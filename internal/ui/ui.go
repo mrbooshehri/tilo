@@ -23,6 +23,10 @@ const (
 	statusBG    = "\x1b[100m"
 	statusFG    = "\x1b[97m"
 	resetStyle  = "\x1b[0m"
+	cursorBlock = "\x1b[2 q"
+	cursorReset = "\x1b[0 q"
+	enterAlt    = "\x1b[?1049h"
+	exitAlt     = "\x1b[?1049l"
 )
 
 type Viewer struct {
@@ -32,13 +36,36 @@ type Viewer struct {
 	Cursor      int
 	CursorCol   int
 	Top         int
+	TopSub      int
 	Query       string
 	Matches     []int
 	MatchIndex  int
-	SelectStart *int
+	SelectStart *Position
+	SelectMode  SelectionMode
 	Status      string
 	StatusAtTop bool
 	LineNumbers bool
+	Wrap        bool
+	HOffset     int
+}
+
+type Position struct {
+	Line int
+	Col  int
+}
+
+type SelectionMode int
+
+const (
+	SelectNone SelectionMode = iota
+	SelectChar
+	SelectLine
+	SelectBlock
+)
+
+type segment struct {
+	start int
+	end   int
 }
 
 func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineNumbers bool) error {
@@ -60,11 +87,13 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 	}
 	defer term.Restore(int(os.Stdin.Fd()), state)
 
+	fmt.Fprint(os.Stdout, enterAlt)
 	fmt.Fprint(os.Stdout, showCursor)
+	fmt.Fprint(os.Stdout, cursorBlock)
 	defer func() {
+		fmt.Fprint(os.Stdout, cursorReset)
 		fmt.Fprint(os.Stdout, resetStyle)
-		fmt.Fprint(os.Stdout, moveHome)
-		fmt.Fprint(os.Stdout, "\x1b[2J")
+		fmt.Fprint(os.Stdout, exitAlt)
 	}()
 
 	reader := bufio.NewReader(os.Stdin)
@@ -95,6 +124,8 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			viewer.moveWordBackward()
 		case 'e':
 			viewer.moveWordEnd()
+		case 'W':
+			viewer.toggleWrap()
 		case 'g':
 			viewer.cursorTop()
 		case 'G':
@@ -107,13 +138,19 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		case 'N':
 			viewer.nextMatch(-1)
 		case 'v':
-			viewer.toggleSelect()
+			viewer.toggleSelect(SelectChar)
+		case 'V':
+			viewer.toggleSelect(SelectLine)
 		case 'y':
 			viewer.copySelection()
 		case 'L':
 			viewer.LineNumbers = !viewer.LineNumbers
 		case 0x1b:
 			viewer.handleEscape(reader)
+		case 0x16:
+			viewer.toggleSelect(SelectBlock)
+		case 'z':
+			viewer.handleZ(reader)
 		}
 	}
 }
@@ -128,47 +165,41 @@ func (v *Viewer) draw() {
 		contentHeight = 1
 	}
 
+	contentWidth := v.contentWidth(width)
 	v.clampCursor()
-	v.ensureVisible(contentHeight)
+	v.ensureVisible(contentHeight, contentWidth)
 
 	fmt.Fprint(os.Stdout, moveHome)
 	if v.StatusAtTop {
-		fmt.Fprint(os.Stdout, statusBG+statusFG)
-		fmt.Fprint(os.Stdout, v.statusLine(width))
-		fmt.Fprint(os.Stdout, resetStyle)
+		fmt.Fprint(os.Stdout, v.renderStatusLine(width))
 		fmt.Fprint(os.Stdout, "\r\n")
 	}
-	start := v.Top
-	end := v.Top + contentHeight
-	if end > len(v.Lines) {
-		end = len(v.Lines)
-	}
-
-	for i := start; i < end; i++ {
-		line := v.Lines[i]
-		if !v.Plain {
-			line = color.ApplyRules(line, v.Rules)
-			line = color.HighlightQuery(line, v.Query)
+	row := 0
+	lineIdx := v.Top
+	sub := v.TopSub
+	for row < contentHeight && lineIdx < len(v.Lines) {
+		line := v.Lines[lineIdx]
+		segments := v.wrapSegments(line, contentWidth)
+		if sub >= len(segments) {
+			lineIdx++
+			sub = 0
+			continue
 		}
-		if v.LineNumbers {
-			prefix := fmt.Sprintf("%*d ", v.lineNumberWidth(), i+1)
-			line = prefix + line
-		}
-		if v.isSelected(i) {
-			line = reverseOn + line + reverseOff
-		}
-		fmt.Fprint(os.Stdout, padRight(truncateANSI(line, width), width))
+		seg := segments[sub]
+		display := v.renderSegment(lineIdx, seg.start, seg.end, contentWidth)
+		fmt.Fprint(os.Stdout, padRight(truncateANSI(display, width), width))
 		fmt.Fprint(os.Stdout, "\r\n")
+		row++
+		sub++
 	}
-	for i := end; i < start+contentHeight; i++ {
+	for row < contentHeight {
 		fmt.Fprint(os.Stdout, strings.Repeat(" ", width))
 		fmt.Fprint(os.Stdout, "\r\n")
+		row++
 	}
 
 	if !v.StatusAtTop {
-		fmt.Fprint(os.Stdout, statusBG+statusFG)
-		fmt.Fprint(os.Stdout, v.statusLine(width))
-		fmt.Fprint(os.Stdout, resetStyle)
+		fmt.Fprint(os.Stdout, v.renderStatusLine(width))
 	}
 
 	v.moveCursorToLine()
@@ -181,8 +212,15 @@ func (v *Viewer) statusLine(width int) string {
 		matchInfo = fmt.Sprintf(" | match %d/%d", v.MatchIndex+1, len(v.Matches))
 	}
 	selection := ""
-	if v.SelectStart != nil {
-		selection = " | visual"
+	if v.SelectMode != SelectNone {
+		switch v.SelectMode {
+		case SelectChar:
+			selection = " | visual"
+		case SelectLine:
+			selection = " | visual-line"
+		case SelectBlock:
+			selection = " | visual-block"
+		}
 	}
 	status := fmt.Sprintf("%s%s%s", lineInfo, matchInfo, selection)
 	if v.Query != "" {
@@ -191,9 +229,14 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	help := "q quit • / search • n/N next • h/j/k/l move • w/b/e word • 0/$ line • g/G top/bot • v select • y yank • L line#"
+	help := "q quit • / search • n/N next • h/j/k/l move • w/b/e word • 0/$ line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap • zh/zl horiz"
 	full := fmt.Sprintf("%s | %s", status, help)
 	return padRight(full, width)
+}
+
+func (v *Viewer) renderStatusLine(width int) string {
+	// Clear line, then paint full-width status bar background.
+	return "\r\x1b[2K" + statusBG + statusFG + v.statusLine(width) + resetStyle
 }
 
 func (v *Viewer) moveCursorToLine() {
@@ -205,20 +248,21 @@ func (v *Viewer) moveCursorToLine() {
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
-	row := v.Cursor - v.Top
-	if row < 0 {
-		row = 0
-	}
-	if row >= contentHeight {
-		row = contentHeight - 1
-	}
+	contentWidth := v.contentWidthFromHeight()
+	row := v.cursorRow(contentHeight, contentWidth)
 	if v.StatusAtTop {
 		row++
 	}
 	row++
-	col := 1 + v.CursorCol
+	displayCol := v.CursorCol
+	if v.Wrap && contentWidth > 0 {
+		displayCol = v.CursorCol % contentWidth
+	} else {
+		displayCol = v.CursorCol - v.HOffset
+	}
+	col := 1 + displayCol
 	if v.LineNumbers {
-		col = v.lineNumberWidth() + 2 + v.CursorCol
+		col = v.lineNumberWidth() + 2 + displayCol
 	}
 	fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", row, col)
 }
@@ -239,6 +283,186 @@ func (v *Viewer) lineRuneCount(idx int) int {
 
 func isWordRune(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+func (v *Viewer) contentWidth(totalWidth int) int {
+	width := totalWidth
+	if v.LineNumbers {
+		width -= v.lineNumberWidth() + 1
+	}
+	if width < 1 {
+		width = 1
+	}
+	return width
+}
+
+func (v *Viewer) contentWidthFromHeight() int {
+	width, _, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		width = 80
+	}
+	return v.contentWidth(width)
+}
+
+func (v *Viewer) wrapSegments(line string, width int) []segment {
+	if width < 1 {
+		width = 1
+	}
+	runes := []rune(line)
+	if !v.Wrap {
+		return []segment{{start: 0, end: len(runes)}}
+	}
+	if len(runes) == 0 {
+		return []segment{{start: 0, end: 0}}
+	}
+	var out []segment
+	for start := 0; start < len(runes); start += width {
+		end := start + width
+		if end > len(runes) {
+			end = len(runes)
+		}
+		out = append(out, segment{start: start, end: end})
+	}
+	return out
+}
+
+func (v *Viewer) lineSegmentCount(idx int, width int) int {
+	if width < 1 {
+		width = 1
+	}
+	if !v.Wrap {
+		return 1
+	}
+	count := v.lineRuneCount(idx)
+	if count == 0 {
+		return 1
+	}
+	return (count + width - 1) / width
+}
+
+func (v *Viewer) cursorSegmentIndex(width int) int {
+	if width < 1 {
+		return 0
+	}
+	if !v.Wrap {
+		return 0
+	}
+	return v.CursorCol / width
+}
+
+func (v *Viewer) globalSegIndex(line, seg, width int) int {
+	idx := 0
+	for i := 0; i < line && i < len(v.Lines); i++ {
+		idx += v.lineSegmentCount(i, width)
+	}
+	return idx + seg
+}
+
+func (v *Viewer) fromGlobalSegIndex(idx, width int) (int, int) {
+	if idx < 0 {
+		return 0, 0
+	}
+	line := 0
+	for line < len(v.Lines) {
+		count := v.lineSegmentCount(line, width)
+		if idx < count {
+			return line, idx
+		}
+		idx -= count
+		line++
+	}
+	if len(v.Lines) == 0 {
+		return 0, 0
+	}
+	last := len(v.Lines) - 1
+	return last, v.lineSegmentCount(last, width) - 1
+}
+
+func (v *Viewer) cursorRow(height int, width int) int {
+	topGlobal := v.globalSegIndex(v.Top, v.TopSub, width)
+	cursorGlobal := v.globalSegIndex(v.Cursor, v.cursorSegmentIndex(width), width)
+	return cursorGlobal - topGlobal
+}
+
+func (v *Viewer) renderSegment(lineIdx int, segStart int, segEnd int, contentWidth int) string {
+	line := v.Lines[lineIdx]
+	runes := []rune(line)
+	if segStart < 0 {
+		segStart = 0
+	}
+	if segEnd > len(runes) {
+		segEnd = len(runes)
+	}
+	start := segStart
+	end := segEnd
+	if !v.Wrap {
+		start = v.HOffset
+		if start < 0 {
+			start = 0
+		}
+		end = start + contentWidth
+		if end > len(runes) {
+			end = len(runes)
+		}
+	}
+	if start > end {
+		start = end
+	}
+	subRunes := runes[start:end]
+	segmentText := string(subRunes)
+	ranges := v.selectionRangesForLine(lineIdx)
+	var overlaps []segment
+	for _, r := range ranges {
+		segStart := r.start
+		segEnd := r.end
+		if segEnd < start || segStart > end {
+			continue
+		}
+		if segStart < start {
+			segStart = start
+		}
+		if segEnd > end {
+			segEnd = end
+		}
+		if segStart >= segEnd {
+			continue
+		}
+		overlaps = append(overlaps, segment{start: segStart - start, end: segEnd - start})
+	}
+	if len(overlaps) == 0 {
+		text := v.applyColors(segmentText, lineIdx)
+		if v.LineNumbers {
+			prefix := fmt.Sprintf("%*d ", v.lineNumberWidth(), lineIdx+1)
+			return prefix + text
+		}
+		return text
+	}
+	var out strings.Builder
+	pos := 0
+	for _, r := range overlaps {
+		if r.start > pos {
+			out.WriteString(v.applyColors(string(subRunes[pos:r.start]), lineIdx))
+		}
+		highlight := v.applyColors(string(subRunes[r.start:r.end]), lineIdx)
+		out.WriteString(applyReverse(highlight))
+		pos = r.end
+	}
+	if pos < len(subRunes) {
+		out.WriteString(v.applyColors(string(subRunes[pos:]), lineIdx))
+	}
+	if v.LineNumbers {
+		prefix := fmt.Sprintf("%*d ", v.lineNumberWidth(), lineIdx+1)
+		return prefix + out.String()
+	}
+	return out.String()
+}
+
+func (v *Viewer) applyColors(text string, lineIdx int) string {
+	if v.Plain {
+		return text
+	}
+	out := color.ApplyRules(text, v.Rules)
+	return color.HighlightQuery(out, v.Query)
 }
 
 func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
@@ -547,6 +771,62 @@ func (v *Viewer) moveWordEnd() {
 	}
 }
 
+func (v *Viewer) toggleWrap() {
+	v.Wrap = !v.Wrap
+	v.HOffset = 0
+	v.TopSub = 0
+	v.Status = ""
+}
+
+func (v *Viewer) handleZ(reader *bufio.Reader) {
+	b, err := reader.ReadByte()
+	if err != nil {
+		return
+	}
+	switch b {
+	case 'h':
+		v.scrollHorizontal(-1)
+	case 'l':
+		v.scrollHorizontal(1)
+	case 'H':
+		v.scrollHorizontal(-v.hScrollStep())
+	case 'L':
+		v.scrollHorizontal(v.hScrollStep())
+	}
+}
+
+func (v *Viewer) hScrollStep() int {
+	width := v.contentWidthFromHeight()
+	if width < 2 {
+		return 1
+	}
+	return width / 2
+}
+
+func (v *Viewer) scrollHorizontal(delta int) {
+	if v.Wrap {
+		return
+	}
+	v.HOffset += delta
+	if v.HOffset < 0 {
+		v.HOffset = 0
+	}
+	max := v.maxHOffset()
+	if v.HOffset > max {
+		v.HOffset = max
+	}
+}
+
+func (v *Viewer) maxHOffset() int {
+	width := v.contentWidthFromHeight()
+	lineLen := v.lineRuneCount(v.Cursor)
+	max := lineLen - width
+	if max < 0 {
+		return 0
+	}
+	return max
+}
+
 func (v *Viewer) page(delta int) {
 	_, height, _ := term.GetSize(int(os.Stdout.Fd()))
 	contentHeight := height - 2
@@ -579,22 +859,31 @@ func (v *Viewer) clampCursor() {
 	}
 }
 
-func (v *Viewer) ensureVisible(height int) {
-	if v.Cursor < v.Top {
-		v.Top = v.Cursor
+func (v *Viewer) ensureVisible(height int, width int) {
+	if width < 1 {
+		width = 1
 	}
-	if v.Cursor >= v.Top+height {
-		v.Top = v.Cursor - height + 1
+	cursorSeg := v.cursorSegmentIndex(width)
+	topGlobal := v.globalSegIndex(v.Top, v.TopSub, width)
+	cursorGlobal := v.globalSegIndex(v.Cursor, cursorSeg, width)
+	if cursorGlobal < topGlobal {
+		topGlobal = cursorGlobal
 	}
-	if v.Top < 0 {
-		v.Top = 0
+	if cursorGlobal >= topGlobal+height {
+		topGlobal = cursorGlobal - (height - 1)
 	}
-	maxTop := len(v.Lines) - height
-	if maxTop < 0 {
-		maxTop = 0
-	}
-	if v.Top > maxTop {
-		v.Top = maxTop
+	v.Top, v.TopSub = v.fromGlobalSegIndex(topGlobal, width)
+	if !v.Wrap {
+		if v.CursorCol < v.HOffset {
+			v.HOffset = v.CursorCol
+		}
+		if v.CursorCol >= v.HOffset+width {
+			v.HOffset = v.CursorCol - width + 1
+		}
+		maxH := v.maxHOffset()
+		if v.HOffset > maxH {
+			v.HOffset = maxH
+		}
 	}
 }
 
@@ -655,57 +944,180 @@ func (v *Viewer) nextMatch(dir int) {
 	v.Status = ""
 }
 
-func (v *Viewer) toggleSelect() {
-	if v.SelectStart == nil {
-		idx := v.Cursor
-		v.SelectStart = &idx
-		v.Status = "select start"
-		return
-	}
-	v.SelectStart = nil
-	v.Status = "selection cleared"
+type posRange struct {
+	start int
+	end   int
 }
 
-func (v *Viewer) isSelected(idx int) bool {
-	if v.SelectStart == nil {
-		return false
+func (v *Viewer) toggleSelect(mode SelectionMode) {
+	if v.SelectMode == mode && v.SelectStart != nil {
+		v.SelectMode = SelectNone
+		v.SelectStart = nil
+		v.Status = "selection cleared"
+		return
+	}
+	v.SelectMode = mode
+	v.SelectStart = &Position{Line: v.Cursor, Col: v.CursorCol}
+	switch mode {
+	case SelectChar:
+		v.Status = "visual"
+	case SelectLine:
+		v.Status = "visual-line"
+	case SelectBlock:
+		v.Status = "visual-block"
+	}
+}
+
+func (v *Viewer) selectionRangesForLine(lineIdx int) []posRange {
+	if v.SelectMode == SelectNone || v.SelectStart == nil {
+		return nil
 	}
 	start := *v.SelectStart
-	if start <= idx && idx <= v.Cursor {
-		return true
+	end := Position{Line: v.Cursor, Col: v.CursorCol}
+	minLine, maxLine := start.Line, end.Line
+	if minLine > maxLine {
+		minLine, maxLine = maxLine, minLine
 	}
-	if v.Cursor <= idx && idx <= start {
-		return true
+	if lineIdx < minLine || lineIdx > maxLine {
+		return nil
 	}
-	return false
+	lineLen := v.lineRuneCount(lineIdx)
+	switch v.SelectMode {
+	case SelectLine:
+		return []posRange{{start: 0, end: lineLen}}
+	case SelectBlock:
+		minCol, maxCol := start.Col, end.Col
+		if minCol > maxCol {
+			minCol, maxCol = maxCol, minCol
+		}
+		if minCol < 0 {
+			minCol = 0
+		}
+		if maxCol >= lineLen {
+			maxCol = lineLen - 1
+		}
+		if lineLen == 0 || minCol > maxCol {
+			return nil
+		}
+		return []posRange{{start: minCol, end: maxCol + 1}}
+	case SelectChar:
+		s := start
+		e := end
+		if s.Line > e.Line || (s.Line == e.Line && s.Col > e.Col) {
+			s, e = e, s
+		}
+		if s.Line == e.Line {
+			minCol, maxCol := s.Col, e.Col
+			if minCol > maxCol {
+				minCol, maxCol = maxCol, minCol
+			}
+			if minCol < 0 {
+				minCol = 0
+			}
+			if maxCol >= lineLen {
+				maxCol = lineLen - 1
+			}
+			if lineLen == 0 || minCol > maxCol {
+				return nil
+			}
+			return []posRange{{start: minCol, end: maxCol + 1}}
+		}
+		if lineIdx == s.Line {
+			startCol := s.Col
+			if startCol < 0 {
+				startCol = 0
+			}
+			if startCol >= lineLen {
+				return nil
+			}
+			return []posRange{{start: startCol, end: lineLen}}
+		}
+		if lineIdx == e.Line {
+			endCol := e.Col
+			if endCol < 0 {
+				endCol = 0
+			}
+			if endCol >= lineLen {
+				endCol = lineLen - 1
+			}
+			if lineLen == 0 {
+				return nil
+			}
+			return []posRange{{start: 0, end: endCol + 1}}
+		}
+		return []posRange{{start: 0, end: lineLen}}
+	}
+	return nil
 }
 
 func (v *Viewer) copySelection() {
-	if v.SelectStart == nil {
+	if v.SelectMode == SelectNone || v.SelectStart == nil {
 		v.Status = "no selection"
 		return
 	}
 	start := *v.SelectStart
-	end := v.Cursor
-	if start > end {
-		start, end = end, start
+	end := Position{Line: v.Cursor, Col: v.CursorCol}
+	minLine, maxLine := start.Line, end.Line
+	if minLine > maxLine {
+		minLine, maxLine = maxLine, minLine
 	}
-	if start < 0 {
-		start = 0
+	if minLine < 0 {
+		minLine = 0
 	}
-	if end >= len(v.Lines) {
-		end = len(v.Lines) - 1
+	if maxLine >= len(v.Lines) {
+		maxLine = len(v.Lines) - 1
 	}
-	if start > end {
-		v.Status = "no selection"
-		return
+	var out []string
+	switch v.SelectMode {
+	case SelectLine:
+		out = append(out, v.Lines[minLine:maxLine+1]...)
+	case SelectBlock:
+		minCol, maxCol := start.Col, end.Col
+		if minCol > maxCol {
+			minCol, maxCol = maxCol, minCol
+		}
+		for i := minLine; i <= maxLine; i++ {
+			runes := []rune(v.Lines[i])
+			if len(runes) == 0 || minCol >= len(runes) {
+				out = append(out, "")
+				continue
+			}
+			endCol := maxCol
+			if endCol >= len(runes) {
+				endCol = len(runes) - 1
+			}
+			out = append(out, string(runes[minCol:endCol+1]))
+		}
+	case SelectChar:
+		for i := minLine; i <= maxLine; i++ {
+			ranges := v.selectionRangesForLine(i)
+			if len(ranges) == 0 {
+				out = append(out, "")
+				continue
+			}
+			runes := []rune(v.Lines[i])
+			var lineOut strings.Builder
+			for _, r := range ranges {
+				if r.start < 0 {
+					r.start = 0
+				}
+				if r.end > len(runes) {
+					r.end = len(runes)
+				}
+				if r.start >= r.end {
+					continue
+				}
+				lineOut.WriteString(string(runes[r.start:r.end]))
+			}
+			out = append(out, lineOut.String())
+		}
 	}
-	text := strings.Join(v.Lines[start:end+1], "\n")
+	text := strings.Join(out, "\n")
 	if err := clipboard.WriteAll(text); err != nil {
 		v.Status = "clipboard failed"
 		return
 	}
-	v.Status = fmt.Sprintf("copied %d lines", end-start+1)
+	v.Status = "copied"
 }
 
 func padRight(s string, width int) string {
@@ -767,4 +1179,12 @@ func stripANSI(s string) string {
 		out.WriteByte(ch)
 	}
 	return out.String()
+}
+
+func applyReverse(s string) string {
+	if s == "" {
+		return s
+	}
+	out := strings.ReplaceAll(s, resetStyle, resetStyle+reverseOn)
+	return reverseOn + out + reverseOff
 }
