@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/term"
 
@@ -19,11 +20,13 @@ import (
 func main() {
 	var configPath string
 	var plain bool
+	var follow bool
 	flag.StringVar(&configPath, "config", "", "path to config file")
 	flag.BoolVar(&plain, "plain", false, "disable color output")
+	flag.BoolVar(&follow, "f", false, "follow file growth")
 	flag.Parse()
 
-	lines, err := readInput(flag.Args())
+	lines, followCh, err := readInput(flag.Args(), follow)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -56,6 +59,11 @@ func main() {
 
 	if !term.IsTerminal(int(os.Stdout.Fd())) || !term.IsTerminal(int(os.Stdin.Fd())) {
 		printNonInteractive(lines, colorRules, plain)
+		if followCh != nil {
+			for batch := range followCh {
+				printNonInteractive(batch, colorRules, plain)
+			}
+		}
 		return
 	}
 
@@ -64,34 +72,49 @@ func main() {
 	if cfg.LineNumbers != nil {
 		lineNumbers = *cfg.LineNumbers
 	}
-	if err := ui.Run(lines, colorRules, plain, statusAtTop, lineNumbers); err != nil {
+	if err := ui.Run(lines, colorRules, plain, statusAtTop, lineNumbers, follow, followCh); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func readInput(args []string) ([]string, error) {
+func readInput(args []string, follow bool) ([]string, <-chan []string, error) {
 	if len(args) > 1 {
-		return nil, errors.New("usage: tilo [path|-]")
+		return nil, nil, errors.New("usage: tilo [path|-]")
 	}
 
 	if len(args) == 0 {
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
-			return readLines(os.Stdin)
+			lines, err := readLines(os.Stdin)
+			return lines, nil, err
 		}
-		return nil, config.ErrNoInput
+		return nil, nil, config.ErrNoInput
 	}
 
 	if args[0] == "-" {
-		return readLines(os.Stdin)
+		if follow {
+			return nil, nil, errors.New("follow requires a file path")
+		}
+		lines, err := readLines(os.Stdin)
+		return lines, nil, err
 	}
 
 	file, err := os.Open(args[0])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer file.Close()
-	return readLines(file)
+	if !follow {
+		defer file.Close()
+		lines, err := readLines(file)
+		return lines, nil, err
+	}
+	lines, err := readLines(file)
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	ch := tailFile(file)
+	return lines, ch, nil
 }
 
 func readLines(r io.Reader) ([]string, error) {
@@ -121,4 +144,29 @@ func printNonInteractive(lines []string, rules []color.Rule, plain bool) {
 		}
 		fmt.Fprintln(os.Stdout, line)
 	}
+}
+
+func tailFile(file *os.File) <-chan []string {
+	out := make(chan []string, 16)
+	reader := bufio.NewReader(file)
+	go func() {
+		defer close(out)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					time.Sleep(200 * time.Millisecond)
+					continue
+				}
+				return
+			}
+			if line == "" {
+				continue
+			}
+			line = strings.TrimSuffix(line, "\n")
+			line = strings.TrimSuffix(line, "\r")
+			out <- []string{line}
+		}
+	}()
+	return out
 }

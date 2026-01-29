@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -49,6 +51,7 @@ type Viewer struct {
 	LineNumbers bool
 	Wrap        bool
 	HOffset     int
+	Follow      bool
 }
 
 type Position struct {
@@ -70,7 +73,7 @@ type segment struct {
 	end   int
 }
 
-func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineNumbers bool) error {
+func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineNumbers bool, follow bool, followCh <-chan []string) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return errors.New("interactive mode requires a terminal")
 	}
@@ -81,6 +84,7 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		Plain:       plain,
 		StatusAtTop: statusAtTop,
 		LineNumbers: lineNumbers,
+		Follow:      follow,
 	}
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -88,6 +92,16 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		return err
 	}
 	defer term.Restore(int(os.Stdin.Fd()), state)
+	fd := int(os.Stdin.Fd())
+	nonblock := follow || followCh != nil
+	if nonblock {
+		if err := syscall.SetNonblock(fd, true); err != nil {
+			return err
+		}
+		defer func() {
+			_ = syscall.SetNonblock(fd, false)
+		}()
+	}
 
 	fmt.Fprint(os.Stdout, enterAlt)
 	fmt.Fprint(os.Stdout, showCursor)
@@ -99,10 +113,32 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 	}()
 
 	reader := bufio.NewReader(os.Stdin)
+	dirty := true
 	for {
-		viewer.draw()
+		if dirty {
+			viewer.draw()
+			dirty = false
+		}
 		b, err := reader.ReadByte()
 		if err != nil {
+			if nonblock && (errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK)) {
+				if followCh != nil {
+					select {
+					case batch, ok := <-followCh:
+						if ok {
+							viewer.appendLines(batch)
+							dirty = true
+						} else {
+							followCh = nil
+						}
+					default:
+						time.Sleep(30 * time.Millisecond)
+					}
+				} else {
+					time.Sleep(30 * time.Millisecond)
+				}
+				continue
+			}
 			return err
 		}
 		switch b {
@@ -166,9 +202,8 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			}
 		case 0x16:
 			viewer.toggleSelect(SelectBlock)
-		case 'z':
-			viewer.handleZ(reader)
 		}
+		dirty = true
 	}
 }
 
@@ -225,32 +260,38 @@ func (v *Viewer) draw() {
 }
 
 func (v *Viewer) statusLine(width int) string {
-	lineInfo := fmt.Sprintf("%d/%d", v.Cursor+1, len(v.Lines))
-	matchInfo := ""
+	var parts []string
 	if v.Query != "" && len(v.Matches) > 0 {
-		matchInfo = fmt.Sprintf(" | match %d/%d", v.MatchIndex+1, len(v.Matches))
+		parts = append(parts, fmt.Sprintf("match %d/%d", v.MatchIndex+1, len(v.Matches)))
 	}
-	selection := ""
 	if v.SelectMode != SelectNone {
 		switch v.SelectMode {
 		case SelectChar:
-			selection = " | visual"
+			parts = append(parts, "visual")
 		case SelectLine:
-			selection = " | visual-line"
+			parts = append(parts, "visual-line")
 		case SelectBlock:
-			selection = " | visual-block"
+			parts = append(parts, "visual-block")
 		}
 	}
-	status := fmt.Sprintf("%s%s%s", lineInfo, matchInfo, selection)
 	if v.Query != "" {
-		status += " | /" + v.Query
+		parts = append(parts, "/"+v.Query)
 	}
 	if v.Status != "" {
-		status += " | " + v.Status
+		parts = append(parts, v.Status)
 	}
-	help := "q quit • / ? search • n/N next • h/j/k/l move • w/b/e word • 0/$/I/A line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap • zh/zl horiz"
-	full := fmt.Sprintf("%s | %s", status, help)
-	return full
+	help := "q quit • / ? search • n/N next • h/j/k/l move • w/b/e word • 0/$/I/A line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap"
+	left := help
+	if len(parts) > 0 {
+		left = strings.Join(parts, " | ") + " | " + help
+	}
+	indicator := fmt.Sprintf("%d/%d", v.Cursor+1, len(v.Lines))
+	available := width - len(stripANSI(indicator))
+	if available < 1 {
+		return indicator
+	}
+	left = padRight(left, available)
+	return left + indicator
 }
 
 func (v *Viewer) renderStatusLine(width int) string {
@@ -266,9 +307,9 @@ func (v *Viewer) renderStatusLine(width int) string {
 }
 
 func (v *Viewer) moveCursorToLine() {
-	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	width, height, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
-		height = 24
+		width, height = 80, 24
 	}
 	contentHeight := height - 2
 	if contentHeight < 1 {
@@ -276,6 +317,12 @@ func (v *Viewer) moveCursorToLine() {
 	}
 	contentWidth := v.contentWidthFromHeight()
 	row := v.cursorRow(contentHeight, contentWidth)
+	if row < 0 {
+		row = 0
+	}
+	if row >= contentHeight {
+		row = contentHeight - 1
+	}
 	if v.StatusAtTop {
 		row++
 	}
@@ -295,6 +342,12 @@ func (v *Viewer) moveCursorToLine() {
 	col := 1 + displayCol
 	if v.LineNumbers {
 		col = v.lineNumberWidth() + 2 + displayCol
+	}
+	if col < 1 {
+		col = 1
+	}
+	if col > width {
+		col = width
 	}
 	fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", row, col)
 }
@@ -828,45 +881,6 @@ func (v *Viewer) toggleWrap() {
 	v.Status = ""
 }
 
-func (v *Viewer) handleZ(reader *bufio.Reader) {
-	b, err := reader.ReadByte()
-	if err != nil {
-		return
-	}
-	switch b {
-	case 'h':
-		v.scrollHorizontal(-1)
-	case 'l':
-		v.scrollHorizontal(1)
-	case 'H':
-		v.scrollHorizontal(-v.hScrollStep())
-	case 'L':
-		v.scrollHorizontal(v.hScrollStep())
-	}
-}
-
-func (v *Viewer) hScrollStep() int {
-	width := v.contentWidthFromHeight()
-	if width < 2 {
-		return 1
-	}
-	return width / 2
-}
-
-func (v *Viewer) scrollHorizontal(delta int) {
-	if v.Wrap {
-		return
-	}
-	v.HOffset += delta
-	if v.HOffset < 0 {
-		v.HOffset = 0
-	}
-	max := v.maxHOffset()
-	if v.HOffset > max {
-		v.HOffset = max
-	}
-}
-
 func (v *Viewer) maxHOffset() int {
 	width := v.contentWidthFromHeight()
 	lineLen := v.lineRuneCount(v.Cursor)
@@ -1224,6 +1238,19 @@ func (v *Viewer) copySelection() {
 		return
 	}
 	v.Status = "copied"
+}
+
+func (v *Viewer) appendLines(lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	atEnd := v.Cursor >= len(v.Lines)-1
+	v.Lines = append(v.Lines, lines...)
+	if v.Follow && atEnd {
+		v.Cursor = len(v.Lines) - 1
+		v.CursorCol = 0
+		v.GoalCol = 0
+	}
 }
 
 func padRight(s string, width int) string {
