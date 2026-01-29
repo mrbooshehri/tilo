@@ -137,8 +137,15 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		case 'G':
 			viewer.cursorBottom()
 		case '/':
-			query := viewer.prompt(reader, "/")
-			viewer.setQuery(query)
+			query, canceled := viewer.prompt(reader, "/")
+			if !canceled {
+				viewer.setQuery(query, 1)
+			}
+		case '?':
+			query, canceled := viewer.prompt(reader, "?")
+			if !canceled {
+				viewer.setQuery(query, -1)
+			}
 		case 'n':
 			viewer.nextMatch(1)
 		case 'N':
@@ -241,7 +248,7 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	help := "q quit • / search • n/N next • h/j/k/l move • w/b/e word • 0/$/I/A line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap • zh/zl horiz"
+	help := "q quit • / ? search • n/N next • h/j/k/l move • w/b/e word • 0/$/I/A line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap • zh/zl horiz"
 	full := fmt.Sprintf("%s | %s", status, help)
 	return full
 }
@@ -490,7 +497,7 @@ func (v *Viewer) applyColors(text string, lineIdx int) string {
 	return color.HighlightQuery(out, v.Query)
 }
 
-func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
+func (v *Viewer) prompt(reader *bufio.Reader, prefix string) (string, bool) {
 	v.Status = ""
 	fmt.Fprint(os.Stdout, moveHome)
 	width, height, _ := term.GetSize(int(os.Stdout.Fd()))
@@ -511,11 +518,13 @@ func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
 	for {
 		b, err := reader.ReadByte()
 		if err != nil {
-			return string(buf)
+			return string(buf), false
 		}
 		switch b {
 		case '\r', '\n':
-			return string(buf)
+			return string(buf), false
+		case 0x1b:
+			return "", true
 		case 0x7f, 0x08:
 			if len(buf) > 0 {
 				buf = buf[:len(buf)-1]
@@ -967,7 +976,7 @@ func (v *Viewer) cursorBottom() {
 	v.Status = ""
 }
 
-func (v *Viewer) setQuery(query string) {
+func (v *Viewer) setQuery(query string, dir int) {
 	v.Query = strings.TrimSpace(query)
 	v.Matches = nil
 	v.MatchIndex = 0
@@ -984,11 +993,31 @@ func (v *Viewer) setQuery(query string) {
 		v.Status = "no matches"
 		return
 	}
-	v.MatchIndex = 0
-	v.Cursor = v.Matches[0]
+	v.MatchIndex = v.closestMatchIndex(dir)
+	v.Cursor = v.Matches[v.MatchIndex]
 	v.CursorCol = 0
 	v.GoalCol = 0
 	v.Status = ""
+}
+
+func (v *Viewer) closestMatchIndex(dir int) int {
+	if len(v.Matches) == 0 {
+		return 0
+	}
+	if dir >= 0 {
+		for i, line := range v.Matches {
+			if line >= v.Cursor {
+				return i
+			}
+		}
+		return 0
+	}
+	for i := len(v.Matches) - 1; i >= 0; i-- {
+		if v.Matches[i] <= v.Cursor {
+			return i
+		}
+	}
+	return len(v.Matches) - 1
 }
 
 func (v *Viewer) nextMatch(dir int) {
