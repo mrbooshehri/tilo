@@ -290,7 +290,7 @@ func (v *Viewer) statusLine(width int) string {
 		left = strings.Join(parts, " | ") + " | " + help
 	}
 	indicator := fmt.Sprintf("%d/%d", v.Cursor+1, len(v.Lines))
-	available := width - len(stripANSI(indicator))
+	available := width - visibleWidth(indicator)
 	if available < 1 {
 		return indicator
 	}
@@ -301,7 +301,7 @@ func (v *Viewer) statusLine(width int) string {
 func (v *Viewer) renderStatusLine(width int) string {
 	// Clear line, then paint full-width status bar background.
 	text := v.statusLine(width)
-	visible := len(stripANSI(text))
+	visible := visibleWidth(text)
 	if visible < width {
 		text += strings.Repeat(" ", width-visible)
 	} else if visible > width {
@@ -1331,6 +1331,10 @@ func stripANSI(s string) string {
 		out.WriteByte(ch)
 	}
 	return out.String()
+}
+
+func visibleWidth(s string) int {
+	return utf8.RuneCountInString(stripANSI(s))
 }
 
 func applyReverse(s string) string {
