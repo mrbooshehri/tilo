@@ -15,13 +15,12 @@ import (
 )
 
 const (
-	clearScreen = "\x1b[2J"
 	moveHome    = "\x1b[H"
-	hideCursor  = "\x1b[?25l"
 	showCursor  = "\x1b[?25h"
 	reverseOn   = "\x1b[7m"
 	reverseOff  = "\x1b[27m"
 	statusBG    = "\x1b[44m"
+	statusFG    = "\x1b[97m"
 	resetStyle  = "\x1b[0m"
 )
 
@@ -59,8 +58,7 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 	}
 	defer term.Restore(int(os.Stdin.Fd()), state)
 
-	fmt.Fprint(os.Stdout, hideCursor)
-	defer fmt.Fprint(os.Stdout, showCursor)
+	fmt.Fprint(os.Stdout, showCursor)
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -113,9 +111,8 @@ func (v *Viewer) draw() {
 	v.ensureVisible(contentHeight)
 
 	fmt.Fprint(os.Stdout, moveHome)
-	fmt.Fprint(os.Stdout, clearScreen)
 	if v.StatusAtTop {
-		fmt.Fprint(os.Stdout, statusBG)
+		fmt.Fprint(os.Stdout, statusBG+statusFG)
 		fmt.Fprint(os.Stdout, v.statusLine(width))
 		fmt.Fprint(os.Stdout, resetStyle)
 		fmt.Fprint(os.Stdout, "\r\n")
@@ -144,12 +141,18 @@ func (v *Viewer) draw() {
 		fmt.Fprint(os.Stdout, truncateANSI(line, width))
 		fmt.Fprint(os.Stdout, "\r\n")
 	}
+	for i := end; i < start+contentHeight; i++ {
+		fmt.Fprint(os.Stdout, strings.Repeat(" ", width))
+		fmt.Fprint(os.Stdout, "\r\n")
+	}
 
 	if !v.StatusAtTop {
-		fmt.Fprint(os.Stdout, statusBG)
+		fmt.Fprint(os.Stdout, statusBG+statusFG)
 		fmt.Fprint(os.Stdout, v.statusLine(width))
 		fmt.Fprint(os.Stdout, resetStyle)
 	}
+
+	v.moveCursorToLine()
 }
 
 func (v *Viewer) statusLine(width int) string {
@@ -172,6 +175,29 @@ func (v *Viewer) statusLine(width int) string {
 	help := "q quit • / search • n/N next • j/k move • g/G top/bot • v select • y yank • l line#"
 	full := fmt.Sprintf("%s | %s", status, help)
 	return padRight(full, width)
+}
+
+func (v *Viewer) moveCursorToLine() {
+	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		height = 24
+	}
+	contentHeight := height - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	row := v.Cursor - v.Top
+	if row < 0 {
+		row = 0
+	}
+	if row >= contentHeight {
+		row = contentHeight - 1
+	}
+	if v.StatusAtTop {
+		row++
+	}
+	row++
+	fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", row, 1)
 }
 
 func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
