@@ -21,6 +21,8 @@ const (
 	showCursor  = "\x1b[?25h"
 	reverseOn   = "\x1b[7m"
 	reverseOff  = "\x1b[27m"
+	statusBG    = "\x1b[44m"
+	resetStyle  = "\x1b[0m"
 )
 
 type Viewer struct {
@@ -35,9 +37,10 @@ type Viewer struct {
 	SelectStart *int
 	Status      string
 	StatusAtTop bool
+	LineNumbers bool
 }
 
-func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool) error {
+func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineNumbers bool) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return errors.New("interactive mode requires a terminal")
 	}
@@ -47,6 +50,7 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool) error
 		Rules:       rules,
 		Plain:       plain,
 		StatusAtTop: statusAtTop,
+		LineNumbers: lineNumbers,
 	}
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -83,14 +87,16 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool) error
 			viewer.nextMatch(1)
 		case 'N':
 			viewer.nextMatch(-1)
-		case 'v':
-			viewer.toggleSelect()
-		case 'y':
-			viewer.copySelection()
-		case 0x1b:
-			viewer.handleEscape(reader)
-		}
+	case 'v':
+		viewer.toggleSelect()
+	case 'y':
+		viewer.copySelection()
+	case 'l':
+		viewer.LineNumbers = !viewer.LineNumbers
+	case 0x1b:
+		viewer.handleEscape(reader)
 	}
+}
 }
 
 func (v *Viewer) draw() {
@@ -109,7 +115,9 @@ func (v *Viewer) draw() {
 	fmt.Fprint(os.Stdout, moveHome)
 	fmt.Fprint(os.Stdout, clearScreen)
 	if v.StatusAtTop {
+		fmt.Fprint(os.Stdout, statusBG)
 		fmt.Fprint(os.Stdout, v.statusLine(width))
+		fmt.Fprint(os.Stdout, resetStyle)
 		fmt.Fprint(os.Stdout, "\r\n")
 	}
 	start := v.Top
@@ -124,7 +132,13 @@ func (v *Viewer) draw() {
 			line = color.ApplyRules(line, v.Rules)
 			line = color.HighlightQuery(line, v.Query)
 		}
+		if v.LineNumbers {
+			prefix := fmt.Sprintf("%6d ", i+1)
+			line = prefix + line
+		}
 		if v.isSelected(i) {
+			line = reverseOn + line + reverseOff
+		} else if i == v.Cursor {
 			line = reverseOn + line + reverseOff
 		}
 		fmt.Fprint(os.Stdout, truncateANSI(line, width))
@@ -132,7 +146,9 @@ func (v *Viewer) draw() {
 	}
 
 	if !v.StatusAtTop {
+		fmt.Fprint(os.Stdout, statusBG)
 		fmt.Fprint(os.Stdout, v.statusLine(width))
+		fmt.Fprint(os.Stdout, resetStyle)
 	}
 }
 
@@ -153,7 +169,7 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	help := "q quit • / search • n/N next • j/k move • g/G top/bot • v select • y yank"
+	help := "q quit • / search • n/N next • j/k move • g/G top/bot • v select • y yank • l line#"
 	full := fmt.Sprintf("%s | %s", status, help)
 	return padRight(full, width)
 }

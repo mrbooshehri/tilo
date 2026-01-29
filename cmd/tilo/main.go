@@ -60,7 +60,11 @@ func main() {
 	}
 
 	statusAtTop := cfg.StatusBar == "top"
-	if err := ui.Run(lines, colorRules, plain, statusAtTop); err != nil {
+	lineNumbers := true
+	if cfg.LineNumbers != nil {
+		lineNumbers = *cfg.LineNumbers
+	}
+	if err := ui.Run(lines, colorRules, plain, statusAtTop, lineNumbers); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

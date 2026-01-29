@@ -20,6 +20,7 @@ type Config struct {
 	DisableBuiltin []string          `yaml:"disable_builtin"`
 	CustomRules    []Rule            `yaml:"custom_rules"`
 	StatusBar      string            `yaml:"status_bar"`
+	LineNumbers    *bool             `yaml:"line_numbers"`
 }
 
 func Load(path string) (Config, error) {
