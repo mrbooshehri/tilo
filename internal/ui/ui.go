@@ -116,7 +116,11 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			viewer.moveCursorCol(1)
 		case '0':
 			viewer.moveLineStart()
+		case 'I':
+			viewer.moveLineStart()
 		case '$':
+			viewer.moveLineEnd()
+		case 'A':
 			viewer.moveLineEnd()
 		case 'w':
 			viewer.moveWordForward()
@@ -229,14 +233,21 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	help := "q quit • / search • n/N next • h/j/k/l move • w/b/e word • 0/$ line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap • zh/zl horiz"
+	help := "q quit • / search • n/N next • h/j/k/l move • w/b/e word • 0/$/I/A line • g/G top/bot • v/V/ctrl-v select • y yank • L line# • W wrap • zh/zl horiz"
 	full := fmt.Sprintf("%s | %s", status, help)
-	return padRight(full, width)
+	return full
 }
 
 func (v *Viewer) renderStatusLine(width int) string {
 	// Clear line, then paint full-width status bar background.
-	return "\r\x1b[2K" + statusBG + statusFG + v.statusLine(width) + resetStyle
+	text := v.statusLine(width)
+	visible := len(stripANSI(text))
+	if visible < width {
+		text += strings.Repeat(" ", width-visible)
+	} else if visible > width {
+		text = truncateANSI(text, width)
+	}
+	return "\r\x1b[2K" + statusBG + statusFG + text + resetStyle
 }
 
 func (v *Viewer) moveCursorToLine() {
@@ -259,6 +270,12 @@ func (v *Viewer) moveCursorToLine() {
 		displayCol = v.CursorCol % contentWidth
 	} else {
 		displayCol = v.CursorCol - v.HOffset
+	}
+	if displayCol < 0 {
+		displayCol = 0
+	}
+	if contentWidth > 0 && displayCol >= contentWidth {
+		displayCol = contentWidth - 1
 	}
 	col := 1 + displayCol
 	if v.LineNumbers {
@@ -660,43 +677,36 @@ func (v *Viewer) moveWordBackward() {
 			col = 0
 		}
 		pos := col
-		if isWordRune(line[pos]) {
-			for pos > 0 && isWordRune(line[pos-1]) {
+		if !isWordRune(line[pos]) {
+			for pos > 0 && !isWordRune(line[pos]) {
 				pos--
 			}
-			v.Cursor = lineIdx
-			v.CursorCol = pos
-			v.clampCursor()
-			v.Status = ""
-			return
+			if pos == 0 && !isWordRune(line[pos]) {
+				if lineIdx == 0 {
+					v.Cursor = 0
+					v.CursorCol = 0
+					v.clampCursor()
+					v.Status = ""
+					return
+				}
+				lineIdx--
+				prev := []rune(v.Lines[lineIdx])
+				if len(prev) == 0 {
+					col = 0
+				} else {
+					col = len(prev) - 1
+				}
+				continue
+			}
 		}
-		for pos > 0 && !isWordRune(line[pos]) {
+		for pos > 0 && isWordRune(line[pos-1]) {
 			pos--
 		}
-		if isWordRune(line[pos]) {
-			for pos > 0 && isWordRune(line[pos-1]) {
-				pos--
-			}
-			v.Cursor = lineIdx
-			v.CursorCol = pos
-			v.clampCursor()
-			v.Status = ""
-			return
-		}
-		if lineIdx == 0 {
-			v.Cursor = 0
-			v.CursorCol = 0
-			v.clampCursor()
-			v.Status = ""
-			return
-		}
-		lineIdx--
-		prev := []rune(v.Lines[lineIdx])
-		if len(prev) == 0 {
-			col = 0
-		} else {
-			col = len(prev) - 1
-		}
+		v.Cursor = lineIdx
+		v.CursorCol = pos
+		v.clampCursor()
+		v.Status = ""
+		return
 	}
 }
 
