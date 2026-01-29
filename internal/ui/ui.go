@@ -52,6 +52,7 @@ type Viewer struct {
 	Wrap        bool
 	HOffset     int
 	Follow      bool
+	InPrompt    bool
 }
 
 type Position struct {
@@ -260,6 +261,9 @@ func (v *Viewer) draw() {
 }
 
 func (v *Viewer) statusLine(width int) string {
+	if v.InPrompt {
+		return ""
+	}
 	var parts []string
 	if v.Query != "" && len(v.Matches) > 0 {
 		parts = append(parts, fmt.Sprintf("match %d/%d", v.MatchIndex+1, len(v.Matches)))
@@ -552,20 +556,12 @@ func (v *Viewer) applyColors(text string, lineIdx int) string {
 
 func (v *Viewer) prompt(reader *bufio.Reader, prefix string) (string, bool) {
 	v.Status = ""
-	fmt.Fprint(os.Stdout, moveHome)
-	width, height, _ := term.GetSize(int(os.Stdout.Fd()))
-	if v.StatusAtTop {
-		fmt.Fprint(os.Stdout, "\x1b[1;1H")
-	} else {
-		fmt.Fprintf(os.Stdout, "\x1b[%d;1H", height)
-	}
-	fmt.Fprint(os.Stdout, padRight(prefix, width))
-	if v.StatusAtTop {
-		fmt.Fprint(os.Stdout, "\x1b[1;1H")
-	} else {
-		fmt.Fprintf(os.Stdout, "\x1b[%d;1H", height)
-	}
-	fmt.Fprint(os.Stdout, prefix)
+	v.InPrompt = true
+	defer func() {
+		v.InPrompt = false
+	}()
+	width, _, _ := term.GetSize(int(os.Stdout.Fd()))
+	v.renderPrompt(prefix, width)
 
 	var buf []rune
 	for {
@@ -581,7 +577,7 @@ func (v *Viewer) prompt(reader *bufio.Reader, prefix string) (string, bool) {
 		case 0x7f, 0x08:
 			if len(buf) > 0 {
 				buf = buf[:len(buf)-1]
-				fmt.Fprint(os.Stdout, "\b \b")
+				v.renderPrompt(prefix+string(buf), width)
 			}
 		default:
 			if b < 32 {
@@ -589,9 +585,32 @@ func (v *Viewer) prompt(reader *bufio.Reader, prefix string) (string, bool) {
 			}
 			r, _ := utf8.DecodeRune([]byte{b})
 			buf = append(buf, r)
-			fmt.Fprint(os.Stdout, string(r))
+			v.renderPrompt(prefix+string(buf), width)
 		}
 	}
+}
+
+func (v *Viewer) renderPrompt(text string, width int) {
+	line := padRight(text, width)
+	if v.StatusAtTop {
+		fmt.Fprint(os.Stdout, moveHome)
+	} else {
+		fmt.Fprintf(os.Stdout, "\x1b[%d;1H", v.terminalHeight())
+	}
+	fmt.Fprint(os.Stdout, statusBG+statusFG+line+resetStyle)
+	if v.StatusAtTop {
+		fmt.Fprintf(os.Stdout, "\x1b[1;%dH", len(stripANSI(text))+1)
+	} else {
+		fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", v.terminalHeight(), len(stripANSI(text))+1)
+	}
+}
+
+func (v *Viewer) terminalHeight() int {
+	_, height, err := term.GetSize(int(os.Stdout.Fd()))
+	if err != nil {
+		return 24
+	}
+	return height
 }
 
 func (v *Viewer) handleEscape(reader *bufio.Reader) {
