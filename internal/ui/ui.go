@@ -36,6 +36,7 @@ type Viewer struct {
 	Plain       bool
 	Cursor      int
 	CursorCol   int
+	GoalCol     int
 	Top         int
 	TopSub      int
 	Query       string
@@ -151,7 +152,11 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		case 'L':
 			viewer.LineNumbers = !viewer.LineNumbers
 		case 0x1b:
-			viewer.handleEscape(reader)
+			if viewer.SelectMode != SelectNone {
+				viewer.clearSelection()
+			} else {
+				viewer.handleEscape(reader)
+			}
 		case 0x16:
 			viewer.toggleSelect(SelectBlock)
 		case 'z':
@@ -250,7 +255,7 @@ func (v *Viewer) renderStatusLine(width int) string {
 	} else if visible > width {
 		text = truncateANSI(text, width)
 	}
-	return "\r\x1b[2K" + statusBG + statusFG + text + resetStyle
+	return statusBG + statusFG + text + resetStyle
 }
 
 func (v *Viewer) moveCursorToLine() {
@@ -560,18 +565,21 @@ func (v *Viewer) handleEscape(reader *bufio.Reader) {
 func (v *Viewer) moveCursor(delta int) {
 	v.Cursor += delta
 	v.clampCursor()
+	v.applyGoalCol()
 	v.Status = ""
 }
 
 func (v *Viewer) moveCursorCol(delta int) {
 	v.CursorCol += delta
 	v.clampCursor()
+	v.GoalCol = v.CursorCol
 	v.Status = ""
 }
 
 func (v *Viewer) moveLineStart() {
 	v.CursorCol = 0
 	v.clampCursor()
+	v.GoalCol = v.CursorCol
 	v.Status = ""
 }
 
@@ -582,6 +590,7 @@ func (v *Viewer) moveLineEnd() {
 	}
 	v.CursorCol = maxCol
 	v.clampCursor()
+	v.GoalCol = v.CursorCol
 	v.Status = ""
 }
 
@@ -633,6 +642,7 @@ func (v *Viewer) moveWordForward() {
 			v.Cursor = lineIdx
 			v.CursorCol = pos
 			v.clampCursor()
+			v.GoalCol = v.CursorCol
 			v.Status = ""
 			return
 		}
@@ -724,6 +734,7 @@ func (v *Viewer) moveWordBackward() {
 		v.Cursor = lineIdx
 		v.CursorCol = col
 		v.clampCursor()
+		v.GoalCol = v.CursorCol
 		v.Status = ""
 		return
 	}
@@ -772,6 +783,7 @@ func (v *Viewer) moveWordEnd() {
 			v.Cursor = lineIdx
 			v.CursorCol = pos - 1
 			v.clampCursor()
+			v.GoalCol = v.CursorCol
 			v.Status = ""
 			return
 		}
@@ -864,6 +876,7 @@ func (v *Viewer) page(delta int) {
 	}
 	v.Cursor += delta * contentHeight
 	v.clampCursor()
+	v.applyGoalCol()
 }
 
 func (v *Viewer) clampCursor() {
@@ -885,6 +898,24 @@ func (v *Viewer) clampCursor() {
 	}
 	if v.CursorCol > maxCol {
 		v.CursorCol = maxCol
+	}
+}
+
+func (v *Viewer) applyGoalCol() {
+	if v.GoalCol < 0 {
+		v.GoalCol = 0
+	}
+	maxCol := v.lineRuneCount(v.Cursor)
+	if maxCol > 0 {
+		maxCol--
+	}
+	if v.GoalCol > maxCol {
+		v.CursorCol = maxCol
+	} else {
+		v.CursorCol = v.GoalCol
+	}
+	if v.CursorCol < 0 {
+		v.CursorCol = 0
 	}
 }
 
@@ -919,6 +950,7 @@ func (v *Viewer) ensureVisible(height int, width int) {
 func (v *Viewer) cursorTop() {
 	v.Cursor = 0
 	v.CursorCol = 0
+	v.GoalCol = 0
 	v.Status = ""
 }
 
@@ -926,10 +958,12 @@ func (v *Viewer) cursorBottom() {
 	if len(v.Lines) == 0 {
 		v.Cursor = 0
 		v.CursorCol = 0
+		v.GoalCol = 0
 		return
 	}
 	v.Cursor = len(v.Lines) - 1
 	v.CursorCol = 0
+	v.GoalCol = 0
 	v.Status = ""
 }
 
@@ -953,6 +987,7 @@ func (v *Viewer) setQuery(query string) {
 	v.MatchIndex = 0
 	v.Cursor = v.Matches[0]
 	v.CursorCol = 0
+	v.GoalCol = 0
 	v.Status = ""
 }
 
@@ -970,6 +1005,7 @@ func (v *Viewer) nextMatch(dir int) {
 	}
 	v.Cursor = v.Matches[v.MatchIndex]
 	v.CursorCol = 0
+	v.GoalCol = 0
 	v.Status = ""
 }
 
@@ -980,13 +1016,15 @@ type posRange struct {
 
 func (v *Viewer) toggleSelect(mode SelectionMode) {
 	if v.SelectMode == mode && v.SelectStart != nil {
-		v.SelectMode = SelectNone
-		v.SelectStart = nil
-		v.Status = "selection cleared"
+		v.clearSelection()
 		return
 	}
 	v.SelectMode = mode
-	v.SelectStart = &Position{Line: v.Cursor, Col: v.CursorCol}
+	startCol := v.CursorCol
+	if mode == SelectBlock {
+		startCol = v.GoalCol
+	}
+	v.SelectStart = &Position{Line: v.Cursor, Col: startCol}
 	switch mode {
 	case SelectChar:
 		v.Status = "visual"
@@ -997,12 +1035,22 @@ func (v *Viewer) toggleSelect(mode SelectionMode) {
 	}
 }
 
+func (v *Viewer) clearSelection() {
+	v.SelectMode = SelectNone
+	v.SelectStart = nil
+	v.Status = "selection cleared"
+}
+
 func (v *Viewer) selectionRangesForLine(lineIdx int) []posRange {
 	if v.SelectMode == SelectNone || v.SelectStart == nil {
 		return nil
 	}
 	start := *v.SelectStart
-	end := Position{Line: v.Cursor, Col: v.CursorCol}
+	endCol := v.CursorCol
+	if v.SelectMode == SelectBlock {
+		endCol = v.GoalCol
+	}
+	end := Position{Line: v.Cursor, Col: endCol}
 	minLine, maxLine := start.Line, end.Line
 	if minLine > maxLine {
 		minLine, maxLine = maxLine, minLine
