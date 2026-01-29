@@ -17,6 +17,7 @@ import (
 
 const (
 	moveHome    = "\x1b[H"
+	hideCursor  = "\x1b[?25l"
 	showCursor  = "\x1b[?25h"
 	reverseOn   = "\x1b[7m"
 	reverseOff  = "\x1b[27m"
@@ -164,6 +165,7 @@ func (v *Viewer) draw() {
 	if err != nil {
 		width, height = 80, 24
 	}
+	fmt.Fprint(os.Stdout, hideCursor)
 	contentHeight := height - 2
 	if contentHeight < 1 {
 		contentHeight = 1
@@ -207,6 +209,7 @@ func (v *Viewer) draw() {
 	}
 
 	v.moveCursorToLine()
+	fmt.Fprint(os.Stdout, showCursor)
 }
 
 func (v *Viewer) statusLine(width int) string {
@@ -652,58 +655,74 @@ func (v *Viewer) moveWordBackward() {
 	lineIdx := v.Cursor
 	col := v.CursorCol
 	for {
+		if lineIdx < 0 {
+			v.Cursor = 0
+			v.CursorCol = 0
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
 		line := []rune(v.Lines[lineIdx])
 		if len(line) == 0 {
-			if lineIdx == 0 {
+			lineIdx--
+			col = 0
+			continue
+		}
+		if col > len(line)-1 {
+			col = len(line) - 1
+		}
+		if col < 0 {
+			col = len(line) - 1
+		}
+		// move left at least one position
+		if col == 0 {
+			lineIdx--
+			if lineIdx >= 0 {
+				prev := []rune(v.Lines[lineIdx])
+				col = len(prev) - 1
+			}
+			continue
+		}
+		col--
+		// skip non-word runes
+		for {
+			if lineIdx < 0 {
 				v.Cursor = 0
 				v.CursorCol = 0
 				v.clampCursor()
 				v.Status = ""
 				return
 			}
-			lineIdx--
-			prev := []rune(v.Lines[lineIdx])
-			if len(prev) == 0 {
-				col = 0
-			} else {
-				col = len(prev) - 1
-			}
-			continue
-		}
-		if col >= len(line) {
-			col = len(line) - 1
-		}
-		if col < 0 {
-			col = 0
-		}
-		pos := col
-		if !isWordRune(line[pos]) {
-			for pos > 0 && !isWordRune(line[pos]) {
-				pos--
-			}
-			if pos == 0 && !isWordRune(line[pos]) {
-				if lineIdx == 0 {
-					v.Cursor = 0
-					v.CursorCol = 0
-					v.clampCursor()
-					v.Status = ""
-					return
-				}
+			line = []rune(v.Lines[lineIdx])
+			if len(line) == 0 {
 				lineIdx--
-				prev := []rune(v.Lines[lineIdx])
-				if len(prev) == 0 {
-					col = 0
-				} else {
-					col = len(prev) - 1
-				}
+				col = 0
 				continue
 			}
+			if col < 0 {
+				lineIdx--
+				if lineIdx >= 0 {
+					prev := []rune(v.Lines[lineIdx])
+					col = len(prev) - 1
+					continue
+				}
+				v.Cursor = 0
+				v.CursorCol = 0
+				v.clampCursor()
+				v.Status = ""
+				return
+			}
+			if isWordRune(line[col]) {
+				break
+			}
+			col--
 		}
-		for pos > 0 && isWordRune(line[pos-1]) {
-			pos--
+		// move to start of word
+		for col > 0 && isWordRune(line[col-1]) {
+			col--
 		}
 		v.Cursor = lineIdx
-		v.CursorCol = pos
+		v.CursorCol = col
 		v.clampCursor()
 		v.Status = ""
 		return
