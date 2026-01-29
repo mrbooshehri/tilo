@@ -290,9 +290,12 @@ func (v *Viewer) statusLine(width int) string {
 		left = strings.Join(parts, " | ") + " | " + help
 	}
 	indicator := fmt.Sprintf("%d/%d", v.Cursor+1, len(v.Lines))
+	if left == "" {
+		return padLeft(indicator, width)
+	}
 	available := width - visibleWidth(indicator)
 	if available < 1 {
-		return indicator
+		return padLeft(indicator, width)
 	}
 	left = padRight(left, available)
 	return left + indicator
@@ -1335,6 +1338,17 @@ func stripANSI(s string) string {
 
 func visibleWidth(s string) int {
 	return utf8.RuneCountInString(stripANSI(s))
+}
+
+func padLeft(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	visible := visibleWidth(s)
+	if visible >= width {
+		return s
+	}
+	return strings.Repeat(" ", width-visible) + s
 }
 
 func applyReverse(s string) string {
