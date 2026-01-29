@@ -3,6 +3,7 @@ package color
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -60,16 +61,69 @@ func colorCode(colorName, style string) string {
 }
 
 func ApplyRules(line string, rules []Rule) string {
-	out := line
+	if len(rules) == 0 || line == "" {
+		return line
+	}
+	type span struct {
+		start int
+		end   int
+		color string
+		style string
+	}
+	occupied := make([]bool, len(line))
+	var spans []span
 	for _, rule := range rules {
 		if !rule.Enabled || rule.Regex == nil {
 			continue
 		}
-		out = rule.Regex.ReplaceAllStringFunc(out, func(match string) string {
-			return Wrap(match, rule.Color, rule.Style)
-		})
+		indices := rule.Regex.FindAllStringIndex(line, -1)
+		for _, idx := range indices {
+			start, end := idx[0], idx[1]
+			if start >= end {
+				continue
+			}
+			skip := false
+			for i := start; i < end; i++ {
+				if occupied[i] {
+					skip = true
+					break
+				}
+			}
+			if skip {
+				continue
+			}
+			for i := start; i < end; i++ {
+				occupied[i] = true
+			}
+			spans = append(spans, span{
+				start: start,
+				end:   end,
+				color: rule.Color,
+				style: rule.Style,
+			})
+		}
 	}
-	return out
+	if len(spans) == 0 {
+		return line
+	}
+	sort.Slice(spans, func(i, j int) bool {
+		if spans[i].start == spans[j].start {
+			return spans[i].end < spans[j].end
+		}
+		return spans[i].start < spans[j].start
+	})
+	var out strings.Builder
+	pos := 0
+	for _, sp := range spans {
+		if sp.start < pos {
+			continue
+		}
+		out.WriteString(line[pos:sp.start])
+		out.WriteString(Wrap(line[sp.start:sp.end], sp.color, sp.style))
+		pos = sp.end
+	}
+	out.WriteString(line[pos:])
+	return out.String()
 }
 
 func BuildDefaultRules() []Rule {

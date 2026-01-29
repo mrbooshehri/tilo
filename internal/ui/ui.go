@@ -19,7 +19,7 @@ const (
 	showCursor  = "\x1b[?25h"
 	reverseOn   = "\x1b[7m"
 	reverseOff  = "\x1b[27m"
-	statusBG    = "\x1b[44m"
+	statusBG    = "\x1b[100m"
 	statusFG    = "\x1b[97m"
 	resetStyle  = "\x1b[0m"
 )
@@ -29,6 +29,7 @@ type Viewer struct {
 	Rules       []color.Rule
 	Plain       bool
 	Cursor      int
+	CursorCol   int
 	Top         int
 	Query       string
 	Matches     []int
@@ -59,6 +60,11 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 	defer term.Restore(int(os.Stdin.Fd()), state)
 
 	fmt.Fprint(os.Stdout, showCursor)
+	defer func() {
+		fmt.Fprint(os.Stdout, resetStyle)
+		fmt.Fprint(os.Stdout, moveHome)
+		fmt.Fprint(os.Stdout, "\x1b[2J")
+	}()
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -74,6 +80,10 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			viewer.moveCursor(1)
 		case 'k':
 			viewer.moveCursor(-1)
+		case 'h':
+			viewer.moveCursorCol(-1)
+		case 'l':
+			viewer.moveCursorCol(1)
 		case 'g':
 			viewer.cursorTop()
 		case 'G':
@@ -85,16 +95,16 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			viewer.nextMatch(1)
 		case 'N':
 			viewer.nextMatch(-1)
-	case 'v':
-		viewer.toggleSelect()
-	case 'y':
-		viewer.copySelection()
-	case 'l':
-		viewer.LineNumbers = !viewer.LineNumbers
-	case 0x1b:
-		viewer.handleEscape(reader)
+		case 'v':
+			viewer.toggleSelect()
+		case 'y':
+			viewer.copySelection()
+		case 'L':
+			viewer.LineNumbers = !viewer.LineNumbers
+		case 0x1b:
+			viewer.handleEscape(reader)
+		}
 	}
-}
 }
 
 func (v *Viewer) draw() {
@@ -130,15 +140,13 @@ func (v *Viewer) draw() {
 			line = color.HighlightQuery(line, v.Query)
 		}
 		if v.LineNumbers {
-			prefix := fmt.Sprintf("%6d ", i+1)
+			prefix := fmt.Sprintf("%*d ", v.lineNumberWidth(), i+1)
 			line = prefix + line
 		}
 		if v.isSelected(i) {
 			line = reverseOn + line + reverseOff
-		} else if i == v.Cursor {
-			line = reverseOn + line + reverseOff
 		}
-		fmt.Fprint(os.Stdout, truncateANSI(line, width))
+		fmt.Fprint(os.Stdout, padRight(truncateANSI(line, width), width))
 		fmt.Fprint(os.Stdout, "\r\n")
 	}
 	for i := end; i < start+contentHeight; i++ {
@@ -172,7 +180,7 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	help := "q quit • / search • n/N next • j/k move • g/G top/bot • v select • y yank • l line#"
+	help := "q quit • / search • n/N next • h/j/k/l move • g/G top/bot • v select • y yank • L line#"
 	full := fmt.Sprintf("%s | %s", status, help)
 	return padRight(full, width)
 }
@@ -197,7 +205,25 @@ func (v *Viewer) moveCursorToLine() {
 		row++
 	}
 	row++
-	fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", row, 1)
+	col := 1 + v.CursorCol
+	if v.LineNumbers {
+		col = v.lineNumberWidth() + 2 + v.CursorCol
+	}
+	fmt.Fprintf(os.Stdout, "\x1b[%d;%dH", row, col)
+}
+
+func (v *Viewer) lineNumberWidth() int {
+	if len(v.Lines) == 0 {
+		return 1
+	}
+	return len(fmt.Sprintf("%d", len(v.Lines)))
+}
+
+func (v *Viewer) lineRuneCount(idx int) int {
+	if idx < 0 || idx >= len(v.Lines) {
+		return 0
+	}
+	return utf8.RuneCountInString(v.Lines[idx])
 }
 
 func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
@@ -259,6 +285,10 @@ func (v *Viewer) handleEscape(reader *bufio.Reader) {
 		v.moveCursor(-1)
 	case 'B':
 		v.moveCursor(1)
+	case 'C':
+		v.moveCursorCol(1)
+	case 'D':
+		v.moveCursorCol(-1)
 	case '5':
 		_, _ = reader.ReadByte()
 		v.page(-1)
@@ -270,6 +300,12 @@ func (v *Viewer) handleEscape(reader *bufio.Reader) {
 
 func (v *Viewer) moveCursor(delta int) {
 	v.Cursor += delta
+	v.clampCursor()
+	v.Status = ""
+}
+
+func (v *Viewer) moveCursorCol(delta int) {
+	v.CursorCol += delta
 	v.clampCursor()
 	v.Status = ""
 }
@@ -294,6 +330,16 @@ func (v *Viewer) clampCursor() {
 	if len(v.Lines) == 0 {
 		v.Cursor = 0
 	}
+	maxCol := v.lineRuneCount(v.Cursor)
+	if maxCol > 0 {
+		maxCol--
+	}
+	if v.CursorCol < 0 {
+		v.CursorCol = 0
+	}
+	if v.CursorCol > maxCol {
+		v.CursorCol = maxCol
+	}
 }
 
 func (v *Viewer) ensureVisible(height int) {
@@ -317,15 +363,18 @@ func (v *Viewer) ensureVisible(height int) {
 
 func (v *Viewer) cursorTop() {
 	v.Cursor = 0
+	v.CursorCol = 0
 	v.Status = ""
 }
 
 func (v *Viewer) cursorBottom() {
 	if len(v.Lines) == 0 {
 		v.Cursor = 0
+		v.CursorCol = 0
 		return
 	}
 	v.Cursor = len(v.Lines) - 1
+	v.CursorCol = 0
 	v.Status = ""
 }
 
@@ -348,6 +397,7 @@ func (v *Viewer) setQuery(query string) {
 	}
 	v.MatchIndex = 0
 	v.Cursor = v.Matches[0]
+	v.CursorCol = 0
 	v.Status = ""
 }
 
@@ -364,6 +414,7 @@ func (v *Viewer) nextMatch(dir int) {
 		v.MatchIndex = 0
 	}
 	v.Cursor = v.Matches[v.MatchIndex]
+	v.CursorCol = 0
 	v.Status = ""
 }
 
