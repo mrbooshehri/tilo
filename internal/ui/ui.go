@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/atotto/clipboard"
@@ -84,6 +85,16 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			viewer.moveCursorCol(-1)
 		case 'l':
 			viewer.moveCursorCol(1)
+		case '0':
+			viewer.moveLineStart()
+		case '$':
+			viewer.moveLineEnd()
+		case 'w':
+			viewer.moveWordForward()
+		case 'b':
+			viewer.moveWordBackward()
+		case 'e':
+			viewer.moveWordEnd()
 		case 'g':
 			viewer.cursorTop()
 		case 'G':
@@ -180,7 +191,7 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	help := "q quit • / search • n/N next • h/j/k/l move • g/G top/bot • v select • y yank • L line#"
+	help := "q quit • / search • n/N next • h/j/k/l move • w/b/e word • 0/$ line • g/G top/bot • v select • y yank • L line#"
 	full := fmt.Sprintf("%s | %s", status, help)
 	return padRight(full, width)
 }
@@ -224,6 +235,10 @@ func (v *Viewer) lineRuneCount(idx int) int {
 		return 0
 	}
 	return utf8.RuneCountInString(v.Lines[idx])
+}
+
+func isWordRune(r rune) bool {
+	return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
@@ -308,6 +323,228 @@ func (v *Viewer) moveCursorCol(delta int) {
 	v.CursorCol += delta
 	v.clampCursor()
 	v.Status = ""
+}
+
+func (v *Viewer) moveLineStart() {
+	v.CursorCol = 0
+	v.clampCursor()
+	v.Status = ""
+}
+
+func (v *Viewer) moveLineEnd() {
+	maxCol := v.lineRuneCount(v.Cursor)
+	if maxCol > 0 {
+		maxCol--
+	}
+	v.CursorCol = maxCol
+	v.clampCursor()
+	v.Status = ""
+}
+
+func (v *Viewer) moveWordForward() {
+	if len(v.Lines) == 0 {
+		return
+	}
+	lineIdx := v.Cursor
+	col := v.CursorCol
+	for {
+		line := []rune(v.Lines[lineIdx])
+		if len(line) == 0 {
+			if lineIdx+1 >= len(v.Lines) {
+				v.Cursor = lineIdx
+				v.CursorCol = 0
+				v.clampCursor()
+				v.Status = ""
+				return
+			}
+			lineIdx++
+			col = 0
+			continue
+		}
+		if col < 0 {
+			col = 0
+		}
+		if col >= len(line) {
+			if lineIdx+1 >= len(v.Lines) {
+				v.Cursor = lineIdx
+				v.CursorCol = len(line) - 1
+				v.clampCursor()
+				v.Status = ""
+				return
+			}
+			lineIdx++
+			col = 0
+			continue
+		}
+		pos := col
+		if isWordRune(line[pos]) {
+			for pos < len(line) && isWordRune(line[pos]) {
+				pos++
+			}
+		}
+		for pos < len(line) && !isWordRune(line[pos]) {
+			pos++
+		}
+		if pos < len(line) {
+			v.Cursor = lineIdx
+			v.CursorCol = pos
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		if lineIdx+1 >= len(v.Lines) {
+			v.Cursor = lineIdx
+			v.CursorCol = len(line) - 1
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		lineIdx++
+		col = 0
+	}
+}
+
+func (v *Viewer) moveWordBackward() {
+	if len(v.Lines) == 0 {
+		return
+	}
+	lineIdx := v.Cursor
+	col := v.CursorCol
+	for {
+		line := []rune(v.Lines[lineIdx])
+		if len(line) == 0 {
+			if lineIdx == 0 {
+				v.Cursor = 0
+				v.CursorCol = 0
+				v.clampCursor()
+				v.Status = ""
+				return
+			}
+			lineIdx--
+			prev := []rune(v.Lines[lineIdx])
+			if len(prev) == 0 {
+				col = 0
+			} else {
+				col = len(prev) - 1
+			}
+			continue
+		}
+		if col >= len(line) {
+			col = len(line) - 1
+		}
+		if col < 0 {
+			col = 0
+		}
+		pos := col
+		if isWordRune(line[pos]) {
+			for pos > 0 && isWordRune(line[pos-1]) {
+				pos--
+			}
+			v.Cursor = lineIdx
+			v.CursorCol = pos
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		for pos > 0 && !isWordRune(line[pos]) {
+			pos--
+		}
+		if isWordRune(line[pos]) {
+			for pos > 0 && isWordRune(line[pos-1]) {
+				pos--
+			}
+			v.Cursor = lineIdx
+			v.CursorCol = pos
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		if lineIdx == 0 {
+			v.Cursor = 0
+			v.CursorCol = 0
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		lineIdx--
+		prev := []rune(v.Lines[lineIdx])
+		if len(prev) == 0 {
+			col = 0
+		} else {
+			col = len(prev) - 1
+		}
+	}
+}
+
+func (v *Viewer) moveWordEnd() {
+	if len(v.Lines) == 0 {
+		return
+	}
+	lineIdx := v.Cursor
+	col := v.CursorCol
+	for {
+		line := []rune(v.Lines[lineIdx])
+		if len(line) == 0 {
+			if lineIdx+1 >= len(v.Lines) {
+				v.Cursor = lineIdx
+				v.CursorCol = 0
+				v.clampCursor()
+				v.Status = ""
+				return
+			}
+			lineIdx++
+			col = 0
+			continue
+		}
+		if col < 0 {
+			col = 0
+		}
+		if col >= len(line) {
+			if lineIdx+1 >= len(v.Lines) {
+				v.Cursor = lineIdx
+				v.CursorCol = len(line) - 1
+				v.clampCursor()
+				v.Status = ""
+				return
+			}
+			lineIdx++
+			col = 0
+			continue
+		}
+		pos := col
+		if isWordRune(line[pos]) {
+			for pos < len(line) && isWordRune(line[pos]) {
+				pos++
+			}
+			v.Cursor = lineIdx
+			v.CursorCol = pos - 1
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		for pos < len(line) && !isWordRune(line[pos]) {
+			pos++
+		}
+		if pos < len(line) {
+			for pos < len(line) && isWordRune(line[pos]) {
+				pos++
+			}
+			v.Cursor = lineIdx
+			v.CursorCol = pos - 1
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		if lineIdx+1 >= len(v.Lines) {
+			v.Cursor = lineIdx
+			v.CursorCol = len(line) - 1
+			v.clampCursor()
+			v.Status = ""
+			return
+		}
+		lineIdx++
+		col = 0
+	}
 }
 
 func (v *Viewer) page(delta int) {
