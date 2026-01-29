@@ -214,7 +214,7 @@ func (v *Viewer) draw() {
 		width, height = 80, 24
 	}
 	fmt.Fprint(os.Stdout, hideCursor)
-	contentHeight := height - 2
+	contentHeight := height - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
@@ -315,7 +315,7 @@ func (v *Viewer) moveCursorToLine() {
 	if err != nil {
 		width, height = 80, 24
 	}
-	contentHeight := height - 2
+	contentHeight := height - 1
 	if contentHeight < 1 {
 		contentHeight = 1
 	}
