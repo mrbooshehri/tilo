@@ -19,6 +19,7 @@ type Config struct {
 	Colors         map[string]string `yaml:"colors"`
 	DisableBuiltin []string          `yaml:"disable_builtin"`
 	CustomRules    []Rule            `yaml:"custom_rules"`
+	StatusBar      string            `yaml:"status_bar"`
 }
 
 func Load(path string) (Config, error) {
@@ -61,6 +62,7 @@ func normalize(cfg *Config) {
 		cfg.CustomRules[i].Color = strings.ToLower(cfg.CustomRules[i].Color)
 		cfg.CustomRules[i].Style = strings.ToLower(cfg.CustomRules[i].Style)
 	}
+	cfg.StatusBar = strings.ToLower(strings.TrimSpace(cfg.StatusBar))
 }
 
 func findDefaultConfig() (string, error) {

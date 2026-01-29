@@ -59,7 +59,8 @@ func main() {
 		return
 	}
 
-	if err := ui.Run(lines, colorRules, plain); err != nil {
+	statusAtTop := cfg.StatusBar == "top"
+	if err := ui.Run(lines, colorRules, plain, statusAtTop); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

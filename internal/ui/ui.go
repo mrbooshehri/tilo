@@ -34,17 +34,19 @@ type Viewer struct {
 	MatchIndex  int
 	SelectStart *int
 	Status      string
+	StatusAtTop bool
 }
 
-func Run(lines []string, rules []color.Rule, plain bool) error {
+func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool) error {
 	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
 		return errors.New("interactive mode requires a terminal")
 	}
 
 	viewer := &Viewer{
-		Lines: lines,
-		Rules: rules,
-		Plain: plain,
+		Lines:       lines,
+		Rules:       rules,
+		Plain:       plain,
+		StatusAtTop: statusAtTop,
 	}
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -106,6 +108,10 @@ func (v *Viewer) draw() {
 
 	fmt.Fprint(os.Stdout, moveHome)
 	fmt.Fprint(os.Stdout, clearScreen)
+	if v.StatusAtTop {
+		fmt.Fprint(os.Stdout, v.statusLine(width))
+		fmt.Fprint(os.Stdout, "\r\n")
+	}
 	start := v.Top
 	end := v.Top + contentHeight
 	if end > len(v.Lines) {
@@ -125,8 +131,9 @@ func (v *Viewer) draw() {
 		fmt.Fprint(os.Stdout, "\r\n")
 	}
 
-	status := v.statusLine(width)
-	fmt.Fprint(os.Stdout, status)
+	if !v.StatusAtTop {
+		fmt.Fprint(os.Stdout, v.statusLine(width))
+	}
 }
 
 func (v *Viewer) statusLine(width int) string {
@@ -146,16 +153,26 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		status += " | " + v.Status
 	}
-	return padRight(status, width)
+	help := "q quit • / search • n/N next • j/k move • g/G top/bot • v select • y yank"
+	full := fmt.Sprintf("%s | %s", status, help)
+	return padRight(full, width)
 }
 
 func (v *Viewer) prompt(reader *bufio.Reader, prefix string) string {
 	v.Status = ""
 	fmt.Fprint(os.Stdout, moveHome)
 	width, height, _ := term.GetSize(int(os.Stdout.Fd()))
-	fmt.Fprintf(os.Stdout, "\x1b[%d;1H", height)
+	if v.StatusAtTop {
+		fmt.Fprint(os.Stdout, "\x1b[1;1H")
+	} else {
+		fmt.Fprintf(os.Stdout, "\x1b[%d;1H", height)
+	}
 	fmt.Fprint(os.Stdout, padRight(prefix, width))
-	fmt.Fprintf(os.Stdout, "\x1b[%d;1H", height)
+	if v.StatusAtTop {
+		fmt.Fprint(os.Stdout, "\x1b[1;1H")
+	} else {
+		fmt.Fprintf(os.Stdout, "\x1b[%d;1H", height)
+	}
 	fmt.Fprint(os.Stdout, prefix)
 
 	var buf []rune
