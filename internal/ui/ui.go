@@ -143,6 +143,10 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			return err
 		}
 		switch b {
+		case '\r', '\n':
+			if viewer.Follow {
+				viewer.appendLines([]string{""})
+			}
 		case 'q':
 			return nil
 		case 'j':
