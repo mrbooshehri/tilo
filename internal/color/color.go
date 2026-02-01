@@ -137,7 +137,7 @@ func BuildDefaultRules() []Rule {
 		{
 			Name:    "url",
 			Color:   "blue",
-			Regex:   regexp.MustCompile(`\bhttps?://[^\s]+`),
+			Regex:   regexp.MustCompile(`\bhttps?://[^\s\)\]\}\>\,\;\:]+`),
 			Enabled: true,
 		},
 		{
@@ -167,7 +167,7 @@ func BuildDefaultRules() []Rule {
 		{
 			Name:    "path",
 			Color:   "green",
-			Regex:   regexp.MustCompile(`\B/(?:[^\s]+)`),
+			Regex:   regexp.MustCompile(`\B/(?:[^\s\)\]\}\>\,\;\:]+)`),
 			Enabled: true,
 		},
 		{
