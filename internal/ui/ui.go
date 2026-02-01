@@ -52,6 +52,7 @@ type Viewer struct {
 	Wrap        bool
 	HOffset     int
 	Follow      bool
+	FollowAuto  bool
 	InPrompt    bool
 }
 
@@ -86,6 +87,7 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		StatusAtTop: statusAtTop,
 		LineNumbers: lineNumbers,
 		Follow:      follow,
+		FollowAuto:  follow,
 	}
 
 	state, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -162,6 +164,8 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			viewer.moveCursorCol(-1)
 		case 'l':
 			viewer.moveCursorCol(1)
+		case 'F':
+			viewer.FollowAuto = true
 		case '0':
 			viewer.moveLineStart()
 		case 'I':
@@ -233,7 +237,7 @@ func (v *Viewer) draw() {
 	}
 
 	contentWidth := v.contentWidth(width)
-	if v.Follow {
+	if v.Follow && v.FollowAuto {
 		if len(v.Lines) == 0 {
 			v.Cursor = 0
 		} else {
@@ -689,6 +693,9 @@ func (v *Viewer) moveCursor(delta int) {
 	v.Cursor += delta
 	v.clampCursor()
 	v.applyGoalCol()
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -696,6 +703,9 @@ func (v *Viewer) moveCursorCol(delta int) {
 	v.CursorCol += delta
 	v.clampCursor()
 	v.GoalCol = v.CursorCol
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -703,6 +713,9 @@ func (v *Viewer) moveLineStart() {
 	v.CursorCol = 0
 	v.clampCursor()
 	v.GoalCol = v.CursorCol
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -714,6 +727,9 @@ func (v *Viewer) moveLineEnd() {
 	v.CursorCol = maxCol
 	v.clampCursor()
 	v.GoalCol = v.CursorCol
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -766,6 +782,9 @@ func (v *Viewer) moveWordForward() {
 			v.CursorCol = pos
 			v.clampCursor()
 			v.GoalCol = v.CursorCol
+			if v.Follow {
+				v.FollowAuto = false
+			}
 			v.Status = ""
 			return
 		}
@@ -858,6 +877,9 @@ func (v *Viewer) moveWordBackward() {
 		v.CursorCol = col
 		v.clampCursor()
 		v.GoalCol = v.CursorCol
+		if v.Follow {
+			v.FollowAuto = false
+		}
 		v.Status = ""
 		return
 	}
@@ -907,6 +929,9 @@ func (v *Viewer) moveWordEnd() {
 			v.CursorCol = pos - 1
 			v.clampCursor()
 			v.GoalCol = v.CursorCol
+			if v.Follow {
+				v.FollowAuto = false
+			}
 			v.Status = ""
 			return
 		}
@@ -961,6 +986,9 @@ func (v *Viewer) page(delta int) {
 	v.Cursor += delta * contentHeight
 	v.clampCursor()
 	v.applyGoalCol()
+	if v.Follow {
+		v.FollowAuto = false
+	}
 }
 
 func (v *Viewer) clampCursor() {
@@ -1035,6 +1063,9 @@ func (v *Viewer) cursorTop() {
 	v.Cursor = 0
 	v.CursorCol = 0
 	v.GoalCol = 0
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -1043,11 +1074,17 @@ func (v *Viewer) cursorBottom() {
 		v.Cursor = 0
 		v.CursorCol = 0
 		v.GoalCol = 0
+		if v.Follow {
+			v.FollowAuto = true
+		}
 		return
 	}
 	v.Cursor = len(v.Lines) - 1
 	v.CursorCol = 0
 	v.GoalCol = 0
+	if v.Follow {
+		v.FollowAuto = true
+	}
 	v.Status = ""
 }
 
@@ -1072,6 +1109,9 @@ func (v *Viewer) setQuery(query string, dir int) {
 	v.Cursor = v.Matches[v.MatchIndex]
 	v.CursorCol = v.matchColForLine(v.Cursor)
 	v.GoalCol = v.CursorCol
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -1110,6 +1150,9 @@ func (v *Viewer) nextMatch(dir int) {
 	v.Cursor = v.Matches[v.MatchIndex]
 	v.CursorCol = v.matchColForLine(v.Cursor)
 	v.GoalCol = v.CursorCol
+	if v.Follow {
+		v.FollowAuto = false
+	}
 	v.Status = ""
 }
 
@@ -1305,12 +1348,13 @@ func (v *Viewer) appendLines(lines []string) {
 	if len(lines) == 0 {
 		return
 	}
-	atEnd := v.Cursor >= len(v.Lines)-1
+	atEnd := v.FollowAuto || v.Cursor >= len(v.Lines)-1
 	v.Lines = append(v.Lines, lines...)
 	if v.Follow && atEnd {
 		v.Cursor = len(v.Lines) - 1
 		v.CursorCol = 0
 		v.GoalCol = 0
+		v.FollowAuto = true
 	}
 }
 
