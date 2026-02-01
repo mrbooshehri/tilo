@@ -135,6 +135,12 @@ func BuildDefaultRules() []Rule {
 			Enabled: true,
 		},
 		{
+			Name:    "url",
+			Color:   "blue",
+			Regex:   regexp.MustCompile(`\bhttps?://[^\s]+`),
+			Enabled: true,
+		},
+		{
 			Name:    "ipv4",
 			Color:   "yellow",
 			Regex:   regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`),
@@ -150,6 +156,12 @@ func BuildDefaultRules() []Rule {
 			Name:    "mac",
 			Color:   "yellow",
 			Regex:   regexp.MustCompile(`\b(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\b`),
+			Enabled: true,
+		},
+		{
+			Name:    "port",
+			Color:   "magenta",
+			Regex:   regexp.MustCompile(`:\d{2,5}\b`),
 			Enabled: true,
 		},
 		{
