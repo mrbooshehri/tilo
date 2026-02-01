@@ -233,6 +233,15 @@ func (v *Viewer) draw() {
 	}
 
 	contentWidth := v.contentWidth(width)
+	if v.Follow {
+		if len(v.Lines) == 0 {
+			v.Cursor = 0
+		} else {
+			v.Cursor = len(v.Lines) - 1
+		}
+		v.CursorCol = 0
+		v.GoalCol = 0
+	}
 	v.clampCursor()
 	v.ensureVisible(contentHeight, contentWidth)
 
