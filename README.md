@@ -73,6 +73,7 @@ Selection
 View
 - `L`: toggle line numbers
 - `W`: toggle line wrapping
+- `F`: re-enable follow and jump to end (when `-f`)
 - `q`: quit
 
 ## Configuration
