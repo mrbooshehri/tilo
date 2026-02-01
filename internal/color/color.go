@@ -174,7 +174,7 @@ func BuildDefaultRules() []Rule {
 			Name:    "level",
 			Color:   "red",
 			Style:   "bold",
-			Regex:   regexp.MustCompile(`(?i)\b(INFO|WARN|ERROR|DEBUG|TRACE|FATAL)\b`),
+			Regex:   regexp.MustCompile(`(?i)\b(INFO|WARN|WARNING|ERROR|DEBUG|TRACE|FATAL)\b`),
 			Enabled: true,
 		},
 		{
@@ -188,7 +188,7 @@ func BuildDefaultRules() []Rule {
 			Name:    "success",
 			Color:   "green",
 			Style:   "bold",
-			Regex:   regexp.MustCompile(`(?i)\b(ok|okay|success|succeeded|complete|completed|done|ready|healthy|passed|pass|connected|accepted|resolved)\b`),
+			Regex:   regexp.MustCompile(`(?i)\b(ok|okay|success|successful|successfully|succeeded|complete|completed|done|ready|healthy|passed|pass|connected|accepted|resolved)\b`),
 			Enabled: true,
 		},
 		{
