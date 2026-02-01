@@ -178,6 +178,20 @@ func BuildDefaultRules() []Rule {
 			Enabled: true,
 		},
 		{
+			Name:    "fail",
+			Color:   "red",
+			Style:   "bold",
+			Regex:   regexp.MustCompile(`(?i)\b(fail|failed|failure|error|err|fatal|panic|crashed|crash|abort|aborted|timeout|timedout|refused|reject|denied|unreachable|unavailable|corrupted|invalid)\b`),
+			Enabled: true,
+		},
+		{
+			Name:    "success",
+			Color:   "green",
+			Style:   "bold",
+			Regex:   regexp.MustCompile(`(?i)\b(ok|okay|success|succeeded|complete|completed|done|ready|healthy|passed|pass|connected|accepted|resolved)\b`),
+			Enabled: true,
+		},
+		{
 			Name:    "keyword",
 			Color:   "magenta",
 			Regex:   regexp.MustCompile(`(?i)\b(kube|pod|node|container|nginx|envoy|http|grpc|tcp|udp|timeout|retry|panic|crash)\b`),
