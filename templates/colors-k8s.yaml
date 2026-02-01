@@ -1,0 +1,16 @@
+# Kubernetes-focused rules
+# Built-in rule names:
+# timestamp, url, ipv4, ipv6, mac, port, path,
+# level_error, level_warn, level_info, level_debug, level_trace,
+# fail, success, keyword
+colors:
+  keyword: magenta
+custom_rules:
+  - pattern: "kube-system"
+    color: magenta
+  - pattern: "coredns"
+    color: cyan
+  - pattern: "kube-apiserver|kube-scheduler|kube-controller-manager"
+    color: yellow
+  - pattern: "etcd"
+    color: blue

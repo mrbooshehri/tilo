@@ -33,6 +33,20 @@ go build -o tilo ./cmd/tilo
 cat /var/log/syslog | ./tilo
 ```
 
+## Sample Logs
+
+Sample logs are included for common services under `sampel/`:
+
+- nginx, zabbix, docker, kuber, envoy
+- mysql, mongo, postgres, redis
+- rabbitmq, haproxy
+
+Example:
+
+```bash
+./tilo sampel/nginx.log
+```
+
 ## Keybindings
 
 Navigation
@@ -67,6 +81,37 @@ Tilo reads config from:
 - `$XDG_CONFIG_HOME/tilo/config.yaml`
 - `~/.config/tilo/config.yaml`
 - `~/.tilo.yaml`
+
+Built-in rule names you can override/disable:
+- `timestamp`
+- `url`
+- `ipv4`
+- `ipv6`
+- `mac`
+- `port`
+- `path`
+- `level_error`
+- `level_warn`
+- `level_info`
+- `level_debug`
+- `level_trace`
+- `fail`
+- `success`
+- `keyword`
+
+Supported color names:
+
+| Color | Value |
+| --- | --- |
+| Black | `black` |
+| Red | `red` |
+| Green | `green` |
+| Yellow | `yellow` |
+| Blue | `blue` |
+| Magenta | `magenta` |
+| Cyan | `cyan` |
+| White | `white` |
+| Gray | `gray` |
 
 Example:
 

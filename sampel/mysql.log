@@ -1,0 +1,3 @@
+2026-02-01T10:25:00Z INFO  mysqld[601]: ready for connections. Version: '8.0.35'  port: 3306  socket: /var/run/mysqld/mysqld.sock
+2026-02-01T10:25:01Z WARNING mysqld[601]: Aborted connection 123 to db: 'test' user: 'root' host: '10.0.0.10' (Got timeout)
+2026-02-01T10:25:02Z ERROR  mysqld[601]: Can't open file: /var/lib/mysql/ibdata1 (errno: 13 - Permission denied)

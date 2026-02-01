@@ -1,0 +1,26 @@
+# Basic color overrides and custom rules
+# Built-in rule names:
+# timestamp, url, ipv4, ipv6, mac, port, path,
+# level_error, level_warn, level_info, level_debug, level_trace,
+# fail, success, keyword
+colors:
+  timestamp: cyan
+  ipv4: yellow
+  ipv6: yellow
+  mac: yellow
+  path: green
+  url: blue
+  port: magenta
+  level_error: red
+  level_warn: yellow
+  level_info: blue
+  level_debug: magenta
+  level_trace: gray
+  fail: red
+  success: green
+  keyword: magenta
+custom_rules:
+  - pattern: "payment-service"
+    color: magenta
+  - pattern: "db-migrate"
+    color: cyan

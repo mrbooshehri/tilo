@@ -1,0 +1,15 @@
+# Minimal coloring (disable noisy built-ins)
+# Built-in rule names:
+# timestamp, url, ipv4, ipv6, mac, port, path,
+# level_error, level_warn, level_info, level_debug, level_trace,
+# fail, success, keyword
+disable_builtin:
+  - keyword
+  - fail
+  - success
+  - level_debug
+  - level_trace
+colors:
+  level_error: red
+  level_warn: yellow
+  level_info: blue
