@@ -1,3 +1,0 @@
-2026-02-01T10:05:00Z INFO  zabbix_server[201]: housekeeper: removed 120 history items
-2026-02-01T10:05:01Z WARNING zabbix_server[201]: item "CPU load" became not supported: Timeout while executing a shell script
-2026-02-01T10:05:02Z ERROR  zabbix_server[201]: database is down: cannot connect to MySQL:3306

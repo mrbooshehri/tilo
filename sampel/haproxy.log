@@ -1,3 +1,0 @@
-2026-02-01T10:50:00Z INFO  haproxy[1101]: Server app/app1 is UP, reason: Layer7 check passed, code: 200, check duration: 10ms
-2026-02-01T10:50:01Z WARNING haproxy[1101]: Server app/app1 is DOWN, reason: Layer4 timeout
-2026-02-01T10:50:02Z ERROR  haproxy[1101]: Backend app has no server available!

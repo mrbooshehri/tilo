@@ -1,3 +1,0 @@
-2026-02-01T10:10:00Z INFO  dockerd[301]: Container started: 7f9c2a1
-2026-02-01T10:10:01Z WARNING dockerd[301]: Network sandbox is not available, retrying
-2026-02-01T10:10:02Z ERROR  dockerd[301]: Failed to pull image "nginx:latest" from https://registry-1.docker.io

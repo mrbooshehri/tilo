@@ -1,3 +1,0 @@
-2026-02-01T10:40:00Z INFO  redis-server[901]: Ready to accept connections
-2026-02-01T10:40:01Z WARNING redis-server[901]: Background saving error: No space left on device
-2026-02-01T10:40:02Z ERROR  redis-server[901]: Connection refused from 10.0.0.12:6379

@@ -1,3 +1,0 @@
-2026-02-01T10:15:00Z INFO  kubelet[401]: Node kube-01 ready
-2026-02-01T10:15:01Z WARNING kubelet[401]: Pod kube-system/coredns-abc is unhealthy
-2026-02-01T10:15:02Z ERROR  kubelet[401]: Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox
