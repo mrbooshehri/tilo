@@ -1,0 +1,11 @@
+2026-02-01T12:00:01Z INFO  Starting service successfully on node kube-01
+2026-02-01T12:00:02Z WARNING Timeout connecting to https://www.rsyslog.com] from 192.168.1.10:514
+2026-02-01T12:00:03Z ERROR  Failed to open /etc/cron.hourly) due to permission denied
+2026-02-01T12:00:04Z DEBUG  Connected to 10.0.0.5:8080 from 2001:db8::1
+2026-02-01T12:00:05Z TRACE  MAC 00:11:22:33:44:55 path /var/lib/dpkg/info/screen.postinst
+2026-02-01T12:00:06Z FATAL  Crash detected in container nginx; retry failed
+Jan  2 03:04:05 host kube pod container http grpc tcp udp timeout retry panic crash
+INFO  Payment succeeded; status=ok; request_id=abc123
+WARN  Request refused by envoy; service unavailable
+SUCCESS  Completed backup successfully; healthy
+2026-02-01T12:00:07.393975+00:00 INFO  https://example.com:443/path?q=1

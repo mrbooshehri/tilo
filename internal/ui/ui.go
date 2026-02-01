@@ -103,6 +103,11 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 			_ = syscall.SetNonblock(fd, false)
 		}()
 	}
+	setNonblock := func(enable bool) {
+		if nonblock {
+			_ = syscall.SetNonblock(fd, enable)
+		}
+	}
 
 	fmt.Fprint(os.Stdout, enterAlt)
 	fmt.Fprint(os.Stdout, showCursor)
@@ -178,12 +183,16 @@ func Run(lines []string, rules []color.Rule, plain bool, statusAtTop bool, lineN
 		case 'G':
 			viewer.cursorBottom()
 		case '/':
+			setNonblock(false)
 			query, canceled := viewer.prompt(reader, "/")
+			setNonblock(true)
 			if !canceled {
 				viewer.setQuery(query, 1)
 			}
 		case '?':
+			setNonblock(false)
 			query, canceled := viewer.prompt(reader, "?")
+			setNonblock(true)
 			if !canceled {
 				viewer.setQuery(query, -1)
 			}
@@ -375,6 +384,23 @@ func (v *Viewer) lineRuneCount(idx int) int {
 		return 0
 	}
 	return utf8.RuneCountInString(v.Lines[idx])
+}
+
+func (v *Viewer) matchColForLine(lineIdx int) int {
+	if lineIdx < 0 || lineIdx >= len(v.Lines) {
+		return 0
+	}
+	if v.Query == "" {
+		return 0
+	}
+	line := v.Lines[lineIdx]
+	lowerLine := strings.ToLower(line)
+	lowerQuery := strings.ToLower(v.Query)
+	idx := strings.Index(lowerLine, lowerQuery)
+	if idx == -1 {
+		return 0
+	}
+	return utf8.RuneCountInString(line[:idx])
 }
 
 func isWordRune(r rune) bool {
@@ -1035,8 +1061,8 @@ func (v *Viewer) setQuery(query string, dir int) {
 	}
 	v.MatchIndex = v.closestMatchIndex(dir)
 	v.Cursor = v.Matches[v.MatchIndex]
-	v.CursorCol = 0
-	v.GoalCol = 0
+	v.CursorCol = v.matchColForLine(v.Cursor)
+	v.GoalCol = v.CursorCol
 	v.Status = ""
 }
 
@@ -1073,8 +1099,8 @@ func (v *Viewer) nextMatch(dir int) {
 		v.MatchIndex = 0
 	}
 	v.Cursor = v.Matches[v.MatchIndex]
-	v.CursorCol = 0
-	v.GoalCol = 0
+	v.CursorCol = v.matchColForLine(v.Cursor)
+	v.GoalCol = v.CursorCol
 	v.Status = ""
 }
 

@@ -31,6 +31,7 @@ var ansiStyles = map[string]string{
 	"bold":      "1",
 	"dim":       "2",
 	"underline": "4",
+	"reverse":   "7",
 }
 
 const reset = "\x1b[0m"
@@ -129,9 +130,9 @@ func ApplyRules(line string, rules []Rule) string {
 func BuildDefaultRules() []Rule {
 	return []Rule{
 		{
-			Name:  "timestamp",
-			Color: "cyan",
-			Regex: regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\b`),
+			Name:    "timestamp",
+			Color:   "cyan",
+			Regex:   regexp.MustCompile(`\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?\b|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\b`),
 			Enabled: true,
 		},
 		{
@@ -289,7 +290,7 @@ func HighlightQuery(line, query string) string {
 	for idx != -1 {
 		out.WriteString(line[start:idx])
 		match := line[idx : idx+len(query)]
-		out.WriteString(Wrap(match, "blue", "underline"))
+		out.WriteString(Wrap(match, "", "reverse"))
 		start = idx + len(query)
 		next := strings.Index(lowerLine[start:], lowerQuery)
 		if next == -1 {
