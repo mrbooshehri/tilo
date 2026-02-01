@@ -297,7 +297,7 @@ func (v *Viewer) statusLine(width int) string {
 	if v.Status != "" {
 		parts = append(parts, v.Status)
 	}
-	help := "[q quit] [/? search] [n/N next] [v/V/^V select]"
+	help := "[q quit] [/? search] [n/N next] [h/j/k/l move] [w/b/e word] [0/$/I/A line] [g/G top/bot] [v/V/^V select] [y yank] [L line#] [W wrap]"
 	left := help
 	if len(parts) > 0 {
 		left = strings.Join(parts, " | ") + " | " + help
