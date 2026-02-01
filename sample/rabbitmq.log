@@ -1,0 +1,3 @@
+2026-02-01T10:45:00Z INFO  rabbitmq[1001]: Server startup complete; success
+2026-02-01T10:45:01Z WARNING rabbitmq[1001]: connection_closed_abruptly from 10.0.0.13:5672
+2026-02-01T10:45:02Z ERROR  rabbitmq[1001]: socket_closed_unexpectedly

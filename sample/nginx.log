@@ -1,0 +1,3 @@
+2026-02-01T10:00:00Z INFO  nginx[123]: 192.168.0.10 - - "GET / HTTP/1.1" 200 612 "-" "curl/8.1.0" 10.0.0.2:443
+2026-02-01T10:00:01Z WARNING nginx[123]: upstream timed out while reading response header from upstream, client: 203.0.113.5, server: example.com, request: "GET /api" upstream: "http://10.0.0.5:8080/api" host: "example.com"
+2026-02-01T10:00:02Z ERROR  nginx[123]: *1 connect() failed (111: Connection refused) while connecting to upstream, client: 203.0.113.5, server: example.com, request: "GET /api" upstream: "http://10.0.0.5:8080/api" host: "example.com"
