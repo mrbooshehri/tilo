@@ -2,6 +2,8 @@
 
 Tilo is a fast, terminal-based log viewer for DevOps and platform engineers. It reads from files or stdin, highlights common infrastructure patterns, and provides Vim-like navigation with search, selection, and clipboard copy.
 
+![screenshot](assets/1.png)
+
 ## Features
 
 - Read from file or stdin (pipe)
